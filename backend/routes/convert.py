@@ -1,0 +1,102 @@
+import asyncio
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+from typing import Annotated, Literal
+from uuid import uuid4
+
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from backend.config import MAX_UPLOAD_BYTES, CONVERSION_TIMEOUT, MAX_CONCURRENT
+
+router = APIRouter()
+slots = asyncio.Semaphore(MAX_CONCURRENT)
+
+
+@router.post('/convert')
+async def convert(
+    file: Annotated[UploadFile, File()],
+    mode: Annotated[Literal['color', 'monochrome'], Form()] = 'color',
+    colors: Annotated[int, Form(ge=2, le=64)] = 16,
+    color_precision: Annotated[int, Form(ge=1, le=8)] = 8,
+    smoothing: Annotated[int, Form(ge=0, le=2)] = 1,
+    detail: Annotated[int, Form(ge=1, le=3)] = 2,
+    speckle: Annotated[int, Form(ge=0, le=64)] = 4,
+    corner: Annotated[int, Form(ge=0, le=2)] = 1,
+    simplify: Annotated[int, Form(ge=0, le=2)] = 0,
+    remove_background: Annotated[bool, Form()] = False,
+):
+    try:
+        if file.content_type not in ('image/png', 'image/jpeg', 'image/webp'):
+            raise HTTPException(415, 'Choose a PNG, JPEG or WebP image.')
+        data = await file.read(MAX_UPLOAD_BYTES + 1)
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise HTTPException(413, 'This image exceeds the upload size limit.')
+        if not data:
+            raise HTTPException(422, 'The uploaded image is empty.')
+        try:
+            await asyncio.wait_for(slots.acquire(), timeout=0.1)
+        except TimeoutError:
+            raise HTTPException(429, 'All converters are busy. Please retry in a moment.', headers={'Retry-After': '3'})
+        started = time.monotonic()
+        try:
+            with tempfile.TemporaryDirectory(prefix='contour-') as directory:
+                target = Path(directory)
+                (target / 'input').write_bytes(data)
+                (target / 'request.json').write_text(json.dumps({'mime': file.content_type, 'settings': {
+                    'mode': mode, 'colors': colors, 'color_precision': color_precision,
+                    'smoothing': smoothing, 'detail': detail, 'speckle': speckle,
+                    'corner': corner, 'simplify': simplify, 'remove_background': remove_background,
+                }}))
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        sys.executable, '-m', 'backend.worker', directory,
+                        cwd=str(Path(__file__).resolve().parents[2]),
+                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    try:
+                        await asyncio.wait_for(process.wait(), timeout=CONVERSION_TIMEOUT)
+                    except TimeoutError:
+                        raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
+                    finally:
+                        if process.returncode is None:
+                            process.kill()
+                            await process.wait()
+                    returncode = process.returncode
+                except NotImplementedError:
+                    # Windows event loop (e.g. SelectorEventLoop used by uvicorn --reload)
+                    # does not support asyncio subprocesses. Fall back to threaded execution.
+                    def _run_worker():
+                        proc = subprocess.Popen(
+                            [sys.executable, '-m', 'backend.worker', directory],
+                            cwd=str(Path(__file__).resolve().parents[2]),
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                        try:
+                            return proc.wait(timeout=CONVERSION_TIMEOUT)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                            proc.wait()
+                            raise
+
+                    try:
+                        returncode = await asyncio.to_thread(_run_worker)
+                    except subprocess.TimeoutExpired:
+                        raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
+
+                if returncode != 0 or not (target / 'result.json').exists():
+                    raise HTTPException(422, 'The tracing engine could not process this image. Try another image.')
+                result = json.loads((target / 'result.json').read_text(encoding='utf-8'))
+                if 'error' in result:
+                    raise HTTPException(422, result['error'])
+        finally:
+            slots.release()
+        stem = re.sub(r'[^a-zA-Z0-9_-]+', '-', (file.filename or 'image').replace('\\', '/').split('/')[-1].rsplit('.', 1)[0]).strip('-')[:60] or 'image'
+        return {**result, 'id': uuid4().hex, 'filename': f'{stem}-contour.svg', 'elapsed_ms': round((time.monotonic() - started) * 1000)}
+    finally:
+        await file.close()
+

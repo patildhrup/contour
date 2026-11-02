@@ -1,0 +1,9 @@
+.venv/
+.tool-cache/
+node_modules/
+dist/
+__pycache__/
+.pytest_cache/
+.env
+*.log
+
