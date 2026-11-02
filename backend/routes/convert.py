@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import subprocess
 import sys
@@ -42,19 +43,26 @@ async def convert(
         except TimeoutError:
             raise HTTPException(429, 'All converters are busy. Please retry in a moment.', headers={'Retry-After': '3'})
         started = time.monotonic()
+        root_dir = Path(__file__).resolve().parents[2]
+        settings = {
+            'mode': mode, 'colors': colors, 'color_precision': color_precision,
+            'smoothing': smoothing, 'detail': detail, 'speckle': speckle,
+            'corner': corner, 'simplify': simplify, 'remove_background': remove_background,
+        }
         try:
             with tempfile.TemporaryDirectory(prefix='contour-') as directory:
                 target = Path(directory)
                 (target / 'input').write_bytes(data)
-                (target / 'request.json').write_text(json.dumps({'mime': file.content_type, 'settings': {
-                    'mode': mode, 'colors': colors, 'color_precision': color_precision,
-                    'smoothing': smoothing, 'detail': detail, 'speckle': speckle,
-                    'corner': corner, 'simplify': simplify, 'remove_background': remove_background,
-                }}))
+                (target / 'request.json').write_text(json.dumps({'mime': file.content_type, 'settings': settings}))
+
+                env = {**os.environ, 'PYTHONPATH': str(root_dir)}
+                result = None
+
                 try:
                     process = await asyncio.create_subprocess_exec(
                         sys.executable, '-m', 'backend.worker', directory,
-                        cwd=str(Path(__file__).resolve().parents[2]),
+                        cwd=str(root_dir),
+                        env=env,
                         stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
                     )
                     try:
@@ -65,14 +73,14 @@ async def convert(
                         if process.returncode is None:
                             process.kill()
                             await process.wait()
-                    returncode = process.returncode
                 except NotImplementedError:
                     # Windows event loop (e.g. SelectorEventLoop used by uvicorn --reload)
                     # does not support asyncio subprocesses. Fall back to threaded execution.
                     def _run_worker():
                         proc = subprocess.Popen(
                             [sys.executable, '-m', 'backend.worker', directory],
-                            cwd=str(Path(__file__).resolve().parents[2]),
+                            cwd=str(root_dir),
+                            env=env,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL,
                         )
@@ -84,13 +92,29 @@ async def convert(
                             raise
 
                     try:
-                        returncode = await asyncio.to_thread(_run_worker)
+                        await asyncio.to_thread(_run_worker)
                     except subprocess.TimeoutExpired:
                         raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
+                except Exception:
+                    pass
 
-                if returncode != 0 or not (target / 'result.json').exists():
-                    raise HTTPException(422, 'The tracing engine could not process this image. Try another image.')
-                result = json.loads((target / 'result.json').read_text(encoding='utf-8'))
+                if (target / 'result.json').exists():
+                    try:
+                        result = json.loads((target / 'result.json').read_text(encoding='utf-8'))
+                    except Exception:
+                        result = None
+
+                # In serverless environments (e.g. Vercel) where subprocess execution may be restricted
+                # or fail to find modules, execute tracing in-process via worker/service logic.
+                if result is None:
+                    try:
+                        from backend.services.tracing import trace, ImageError
+                        result = await asyncio.to_thread(trace, data, file.content_type, settings)
+                    except ImageError as exc:
+                        raise HTTPException(422, str(exc))
+                    except Exception:
+                        raise HTTPException(422, 'The tracing engine could not process this image. Try another image.')
+
                 if 'error' in result:
                     raise HTTPException(422, result['error'])
         finally:
@@ -99,4 +123,3 @@ async def convert(
         return {**result, 'id': uuid4().hex, 'filename': f'{stem}-contour.svg', 'elapsed_ms': round((time.monotonic() - started) * 1000)}
     finally:
         await file.close()
-

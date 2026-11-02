@@ -22,7 +22,23 @@ import { ConversionProgress } from "./components/ConversionProgress";
 import { DownloadPanel } from "./components/DownloadPanel";
 import { FAQ } from "./components/FAQ";
 import { Footer } from "./components/Footer";
-const apiBase = import.meta.env.VITE_API_BASE_URL || "";
+function getApiBase(): string {
+  const envUrl = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
+  if (typeof window !== "undefined") {
+    const host = window.location.hostname;
+    // On local environment, use same-origin proxy to local backend (port 8080)
+    if (host === "localhost" || host === "127.0.0.1") {
+      return "";
+    }
+    // When running on Vercel frontend, default to production backend if not explicitly set
+    if (host.endsWith(".vercel.app") && !envUrl) {
+      return "https://contour-backend.vercel.app";
+    }
+  }
+  return envUrl;
+}
+
+const apiBase = getApiBase();
 
 function makeSample(): Promise<File> {
   const canvas = document.createElement("canvas");

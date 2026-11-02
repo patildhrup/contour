@@ -40,8 +40,17 @@ class BodyLimit:
 
 app = FastAPI(title='Contour API', version='1.0.0')
 app.include_router(router, prefix='/api')
+app.include_router(router)
 app.add_middleware(BodyLimit)
-app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=['GET', 'POST'], allow_headers=['Content-Type'])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=CORS_ORIGINS,
+    allow_origin_regex=r"^https://.*\.vercel\.app$",
+    allow_credentials=True,
+    allow_methods=['GET', 'POST', 'OPTIONS', 'HEAD'],
+    allow_headers=['*'],
+    expose_headers=['*'],
+)
 
 
 @app.middleware('http')
@@ -62,6 +71,18 @@ async def unexpected_error(request, exc):
     return JSONResponse(status_code=500, content={'detail': 'Conversion is temporarily unavailable. Please try again.'})
 
 
+@app.get('/')
+def root():
+    return {
+        'name': 'Contour API',
+        'status': 'online',
+        'version': '1.0.0',
+        'health': '/api/health',
+        'docs': '/docs',
+    }
+
+
+@app.get('/health')
 @app.get('/api/health')
 def health():
     try:
