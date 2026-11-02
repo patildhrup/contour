@@ -63,6 +63,47 @@ Existing alpha is thresholded at 50%; partial opacity is not retained. Near-whit
 
 ## Deployment
 
+### Vercel
+
+Deploy the backend and frontend as separate Vercel projects. The backend must use
+the **repository root**, because its modules import the `backend` package.
+
+For `contour-backend`, open **Settings > Build and Deployment**:
+
+- Set **Root Directory** to the repository root (leave the field empty / `.`),
+  rather than `backend`.
+- Use the **FastAPI** framework preset. Clear custom Build Command, Install
+  Command and Output Directory overrides so Vercel uses the preset defaults.
+- Deploy with the root `vercel.json`, `main.py`, `requirements.txt` and
+  `.python-version`. Python 3.12 installs the pinned backend dependencies.
+- Set `CORS_ORIGINS=https://contour-black.vercel.app` in the backend project's
+  production environment. Redeploy after changing settings or variables.
+
+The FastAPI preset routes requests to `main.py`, which exports `backend.main.app`.
+Do not combine legacy `builds` / `routes` configuration with `rewrites`, or add a
+rewrite to `/api/index.py`. The root configuration explicitly includes the backend
+files, including the subprocess worker and tracing services.
+
+For `contour-black`, keep **Root Directory** set to `frontend` with the **Vite**
+preset, and set `VITE_API_BASE_URL=https://contour-backend.vercel.app`. Redeploy
+the frontend if this build-time variable changes.
+
+After deploying, check `https://contour-backend.vercel.app/api/health`: it should
+return `status: "ok"` and `engine_ok: true`. Then convert a small PNG in the
+frontend to check the native tracing dependency and worker execution too.
+If startup still fails, expand a failed invocation in Vercel Runtime Logs and
+read the final exception line; the collapsed "could not import" message alone
+does not identify a missing module or native-library failure.
+
+Vercel Functions limit request and response bodies to 4.5 MB, including multipart
+and JSON overhead, even though this application's container defaults allow larger
+files. Keep Vercel uploads and SVG responses below that platform limit; use the
+container deployment below when larger payloads are required. See
+[Vercel's Python runtime](https://vercel.com/docs/functions/runtimes/python) and
+[Function limits](https://vercel.com/docs/functions/limitations).
+
+### Container
+
 ```sh
 docker compose up --build -d
 ```
@@ -71,7 +112,9 @@ Open http://localhost:8080. Nginx serves the built frontend and proxies the priv
 
 The compose port binds to loopback. For a public deployment, place a TLS reverse proxy/load balancer in front, configure your domain, tune limits to measured workload, and supply your operator contact/privacy terms. No billing/authentication service is implemented. One API process is used by default; `MAX_CONCURRENT` applies per process if you add workers. Preserve proxy request limits and do not expose a development Vite server publicly.
 
-This Python/Rust tracing service requires a container or VM; it cannot run inside a Cloudflare Worker/Sites static deployment.
+This Python/Rust tracing service requires a Python runtime with native dependencies,
+such as Vercel's Python Functions or a container/VM; it cannot run inside a
+Cloudflare Worker/Sites static deployment.
 
 ## Verification
 

@@ -95,6 +95,9 @@ async def convert(
                         await asyncio.to_thread(_run_worker)
                     except subprocess.TimeoutExpired:
                         raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
+                except HTTPException:
+                    # Preserve timeouts instead of retrying unbounded work in-process.
+                    raise
                 except Exception:
                     pass
 
