@@ -48,28 +48,44 @@ def _trace_params(settings: dict, scale: int) -> dict:
     speckle = _int_setting(settings, 'speckle', 4, 0, 64)
     corner = _int_setting(settings, 'corner', 1, 0, 2)
     simplify = _int_setting(settings, 'simplify', 0, 0, 2)
-    color_precision = _int_setting(settings, 'color_precision', 8, 1, 8)
     colors = _int_setting(settings, 'colors', 16, 2, 64)
 
-    # Filter speckles in the *upscaled* pixel grid so the control still means original pixels.
-    filter_speckle = min(64, speckle * scale)
-    if detail == 3:
-        filter_speckle = max(0, filter_speckle - 1)
+    # Adaptive color precision and layer separation to eliminate fringe halos around edges:
+    if colors <= 8:
+        color_precision = 4
+        layer_difference = 36
+    elif colors <= 16:
+        color_precision = 5
+        layer_difference = 28
+    elif colors <= 32:
+        color_precision = 6
+        layer_difference = 20
+    else:
+        color_precision = 6
+        layer_difference = 16
 
-    # Lower length_threshold keeps more of the original contour. Range allowed by VTracer: 3.5–10.
-    length_threshold = {0: 3.5, 1: 4.0, 2: 5.5}[simplify]
-    if detail == 3:
-        length_threshold = max(3.5, length_threshold - 0.5)
-    if detail == 1:
-        length_threshold = min(8.0, length_threshold + 1.0)
+    if 'color_precision' in settings:
+        color_precision = _int_setting(settings, 'color_precision', color_precision, 1, 8)
 
-    # Lower corner_threshold preserves geometric corners; higher keeps organic curves round.
-    corner_threshold = {0: 90, 1: 60, 2: 28}[corner]
-    if smoothing == 2 and corner < 2:
-        corner_threshold = min(110, corner_threshold + 20)
+    filter_speckle = max(4, speckle * 2)
 
-    splice_threshold = {0: 35, 1: 45, 2: 62}[smoothing]
-    layer_difference = max(4, min(16, 20 - color_precision if colors >= 12 else 16))
+    # Corner threshold:
+    # 55-65 keeps acute corners sharp (like hair spikes or logo points),
+    # while rounding off 90-degree pixel staircases.
+    corner_threshold = {0: 45, 1: 58, 2: 75}[corner]
+    if smoothing == 2:
+        corner_threshold = max(35, corner_threshold - 10)
+
+    # Length threshold:
+    # Controls curve segment length. Higher values produce longer, smoother sweeping curves.
+    length_threshold = {1: 7.0, 2: 5.5, 3: 4.0}[detail]
+    if simplify == 1:
+        length_threshold += 1.0
+    elif simplify == 2:
+        length_threshold += 2.5
+
+    splice_threshold = {0: 40, 1: 45, 2: 55}[smoothing]
+
     return {
         'colormode': 'color',
         'hierarchical': 'stacked',
@@ -79,9 +95,9 @@ def _trace_params(settings: dict, scale: int) -> dict:
         'layer_difference': layer_difference,
         'corner_threshold': corner_threshold,
         'length_threshold': length_threshold,
-        'max_iterations': 10 if detail < 3 else 20,
+        'max_iterations': 20,
         'splice_threshold': splice_threshold,
-        'path_precision': 5 if detail >= 2 else 3,
+        'path_precision': 4,
     }
 
 

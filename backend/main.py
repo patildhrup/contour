@@ -40,16 +40,13 @@ class BodyLimit:
 
 app = FastAPI(title='Contour API', version='1.0.0')
 app.include_router(router, prefix='/api')
-app.include_router(router)
 app.add_middleware(BodyLimit)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_origin_regex=r"^https://.*\.vercel\.app$",
-    allow_credentials=True,
-    allow_methods=['GET', 'POST', 'OPTIONS', 'HEAD'],
+    allow_methods=['GET', 'POST', 'OPTIONS'],
     allow_headers=['*'],
-    expose_headers=['*'],
 )
 
 

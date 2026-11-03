@@ -1,8 +1,7 @@
-"""Adaptive image preprocessing before VTracer. Strength follows the image, not a fixed filter stack."""
+"""Adaptive image preprocessing before VTracer. Smooths pixelation and staircases while keeping sharp edges."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-
 import numpy as np
 from PIL import Image, ImageFilter
 
@@ -30,164 +29,82 @@ def _visible_mask(rgba: np.ndarray, remove_background: bool) -> tuple[np.ndarray
     return mask, notices
 
 
-def _packed_unique(rgb: np.ndarray) -> int:
-    if rgb.size == 0:
-        return 0
-    packed = (
-        rgb[:, 0].astype(np.uint32) << 16
-        | rgb[:, 1].astype(np.uint32) << 8
-        | rgb[:, 2].astype(np.uint32)
-    )
-    return int(np.unique(packed).size)
+def _edge_preserving_smooth(image: Image.Image, sigma_s: float = 2.0, sigma_r: float = 32.0) -> Image.Image:
+    """
+    Fast bilateral edge-preserving filter in numpy.
+    Smooths pixel noise and staircase steps along contours while keeping sharp color edges.
+    """
+    arr = np.array(image)
+    has_alpha = arr.ndim == 3 and arr.shape[2] == 4
+    if has_alpha:
+        alpha = arr[:, :, 3]
+        rgb = arr[:, :, :3].astype(np.float32)
+    else:
+        rgb = arr[:, :, :3].astype(np.float32) if arr.ndim == 3 else np.repeat(arr[:, :, None], 3, axis=2).astype(np.float32)
+        alpha = None
 
+    h, w, _ = rgb.shape
+    rad = 2 if max(h, w) <= 1200 else 1
+    y, x = np.mgrid[-rad : rad + 1, -rad : rad + 1]
+    spatial_w = np.exp(-(x**2 + y**2) / (2 * sigma_s**2)).astype(np.float32)
+    padded = np.pad(rgb, ((rad, rad), (rad, rad), (0, 0)), mode='edge')
+    out = np.zeros_like(rgb)
+    weights = np.zeros((h, w, 1), dtype=np.float32)
 
-def _noise_level(rgb: np.ndarray, mask: np.ndarray) -> float:
-    if not mask.any():
-        return 0.0
-    src = rgb.astype(np.int16)
-    neighbor = (
-        np.roll(src, 1, 0) + np.roll(src, -1, 0) + np.roll(src, 1, 1) + np.roll(src, -1, 1)
-    ) // 4
-    delta = np.abs(src - neighbor).mean(axis=2)
-    return float(delta[mask].mean())
+    for dy in range(-rad, rad + 1):
+        for dx in range(-rad, rad + 1):
+            sw = spatial_w[dy + rad, dx + rad]
+            neighbor = padded[rad + dy : rad + dy + h, rad + dx : rad + dx + w]
+            diff = np.sum((neighbor - rgb) ** 2, axis=2, keepdims=True)
+            rw = np.exp(-diff / (2 * sigma_r**2)) * sw
+            out += neighbor * rw
+            weights += rw
 
+    smoothed = np.clip(out / np.maximum(weights, 1e-5), 0, 255).astype(np.uint8)
+    smooth_img = Image.fromarray(smoothed)
+    smooth_img = smooth_img.filter(ImageFilter.GaussianBlur(0.7))
 
-def _choose_scale(width: int, height: int, detail: int, unique_colors: int) -> int:
-    longest = max(width, height)
-    target = {1: 960, 2: 1400, 3: 1800}[detail]
-    if longest >= target:
-        return 1
-    wanted = min(4, max(2, round(target / max(longest, 1))))
-    # Pixel-art palettes stay on integer scales so block edges stay aligned.
-    if unique_colors <= 48 and longest <= 512:
-        wanted = min(4, max(2, wanted))
-    while wanted > 1:
-        new_w, new_h = width * wanted, height * wanted
-        if new_w * new_h <= MAX_PIXELS and max(new_w, new_h) <= MAX_DIMENSION:
-            return wanted
-        wanted -= 1
-    return 1
-
-
-def _similar_neighbor_average(rgb: np.ndarray, threshold: int) -> np.ndarray:
-    """Edge-aware smooth: average only neighbors whose color is close to the center pixel."""
-    height, width, _ = rgb.shape
-    padded = np.pad(rgb, ((1, 1), (1, 1), (0, 0)), mode='edge').astype(np.int16)
-    center = rgb.astype(np.int16)
-    acc = np.zeros((height, width, 3), np.float32)
-    weight = np.zeros((height, width, 1), np.float32)
-    for dy in range(3):
-        for dx in range(3):
-            neighbor = padded[dy : dy + height, dx : dx + width]
-            dist = np.abs(neighbor - center).sum(axis=2, keepdims=True)
-            keep = (dist <= threshold).astype(np.float32)
-            acc += neighbor * keep
-            weight += keep
-    return np.clip(acc / np.maximum(weight, 1), 0, 255).astype(np.uint8)
-
-
-def _kmeans_quantize(rgb: np.ndarray, mask: np.ndarray, count: int) -> np.ndarray:
-    visible = rgb[mask]
-    if visible.size == 0:
-        return rgb
-    unique_count = _packed_unique(visible)
-    if unique_count <= count:
-        out = rgb.copy()
-        out[~mask] = 255
-        return out
-    sample_n = min(len(visible), 14000)
-    sample_idx = np.linspace(0, len(visible) - 1, sample_n).astype(np.int64)
-    samples = visible[sample_idx].astype(np.float32)
-    order = np.argsort(samples.mean(axis=1))
-    centroids = samples[order[np.linspace(0, sample_n - 1, count).astype(np.int64)]]
-    for _ in range(8):
-        delta = ((samples[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
-        labels = delta.argmin(axis=1)
-        for i in range(count):
-            members = samples[labels == i]
-            if len(members):
-                centroids[i] = members.mean(axis=0)
-    assigned = np.empty((len(visible), 3), np.uint8)
-    vis = visible.astype(np.float32)
-    chunk = 40000
-    for start in range(0, len(visible), chunk):
-        sl = vis[start : start + chunk]
-        delta = ((sl[:, None, :] - centroids[None, :, :]) ** 2).sum(axis=2)
-        assigned[start : start + chunk] = np.clip(np.round(centroids[delta.argmin(axis=1)]), 0, 255).astype(np.uint8)
-    out = np.full(rgb.shape, 255, np.uint8)
-    out[mask] = assigned
-    return out
-
-
-def _pillow_quantize(rgb: np.ndarray, mask: np.ndarray, count: int, illustration: bool) -> np.ndarray:
-    work = rgb.copy()
-    work[~mask] = 255
-    image = Image.fromarray(work)
-    method = Image.Quantize.MAXCOVERAGE if illustration else Image.Quantize.MEDIANCUT
-    quantized = np.array(image.quantize(colors=count, method=method).convert('RGB'))
-    quantized[~mask] = 255
-    return quantized
-
-
-def quantize_colors(rgb: np.ndarray, mask: np.ndarray, count: int, illustration: bool) -> np.ndarray:
-    visible = int(mask.sum())
-    if visible == 0:
-        return np.full(rgb.shape, 255, np.uint8)
-    if visible <= 180_000 and count <= 32:
-        return _kmeans_quantize(rgb, mask, count)
-    return _pillow_quantize(rgb, mask, count, illustration)
+    if has_alpha:
+        return Image.fromarray(np.dstack((np.array(smooth_img), alpha)))
+    return smooth_img
 
 
 def prepare(image: Image.Image, settings: dict) -> PrepResult:
     original_size = image.size
-    width, height = original_size
     rgba = np.array(image)
     mask, notices = _visible_mask(rgba, bool(settings.get('remove_background', False)))
-    rgb = rgba[:, :, :3]
-    visible = rgb[mask]
-    unique = _packed_unique(visible[:: max(1, len(visible) // 30000)] if len(visible) else visible)
-    noise = _noise_level(rgb, mask)
-    illustration = unique <= 400 or (unique <= 1200 and max(width, height) <= 1024)
-    pixel_art = unique <= 48 and max(width, height) <= 512
-    detail = int(settings.get('detail', 2))
-    speckle = int(settings.get('speckle', 4))
-    scale = _choose_scale(width, height, detail, unique)
+    
+    smoothing = int(settings.get('smoothing', 1))
+    mode = settings.get('mode', 'color')
 
-    if scale > 1:
-        resample = Image.Resampling.NEAREST if pixel_art else Image.Resampling.LANCZOS
-        image = image.resize((width * scale, height * scale), resample)
+    # Count unique visible colors to detect flat graphics vs anti-aliased/noisy images
+    visible_rgb = rgba[mask, :3] if mask.any() else rgba[:, :, :3].reshape(-1, 3)
+    if len(visible_rgb) > 0:
+        sample = visible_rgb[:: max(1, len(visible_rgb) // 10000)]
+        packed = (sample[:, 0].astype(np.uint32) << 16 | sample[:, 1].astype(np.uint32) << 8 | sample[:, 2].astype(np.uint32))
+        unique_count = len(np.unique(packed))
+    else:
+        unique_count = 0
+
+    # Only smooth when smoothing is requested and image has anti-aliasing / pixelation noise
+    if smoothing > 0 and unique_count > 6:
+        sigma_s = 1.8 if smoothing == 1 else 2.5
+        image = _edge_preserving_smooth(image, sigma_s=sigma_s, sigma_r=32.0)
         rgba = np.array(image)
         mask, _ = _visible_mask(rgba, bool(settings.get('remove_background', False)))
-        rgb = rgba[:, :, :3]
-        notices.append(f'Low-resolution input was scaled {scale}× so curves can be fitted more smoothly.')
 
-    # Noise reduction is skipped on already-flat palettes so small marks survive.
-    if speckle > 0 and not pixel_art:
-        passes = 1 if noise < 14 and speckle < 12 else 2
-        if detail >= 3:
-            passes = min(passes, 1)
-        threshold = 14 if illustration else 22
-        threshold += min(18, speckle // 2)
-        for _ in range(passes):
-            rgb = _similar_neighbor_average(rgb, threshold)
-            rgb[~mask] = 255
+    rgb = rgba[:, :, :3]
 
-    if settings.get('mode') == 'monochrome':
+    if mode == 'monochrome':
         gray = np.array(Image.fromarray(rgb).convert('L'))
         rgb = np.repeat(np.where(gray < 128, 0, 255)[:, :, None], 3, axis=2).astype('uint8')
         rgb[~mask] = 255
     else:
-        colors = max(2, min(64, int(settings.get('colors', 16))))
-        rgb = quantize_colors(rgb, mask, colors, illustration)
-        if speckle >= 3 and not pixel_art:
-            cleaned = Image.fromarray(rgb).filter(ImageFilter.ModeFilter(3))
-            rgb = np.array(cleaned)
-            rgb[~mask] = 255
-        if unique > colors:
-            notices.append(f'Palette reduced to {colors} colors to keep region boundaries clean.')
+        rgb[~mask] = 255
 
     alpha = np.where(mask, 255, 0).astype('uint8')
     prepared = Image.fromarray(np.dstack((rgb, alpha)))
     if not mask.any():
         notices.append('No visible pixels remain after transparency/background filtering.')
-    return PrepResult(image=prepared, original_size=original_size, scale=scale, notices=notices)
+        
+    return PrepResult(image=prepared, original_size=original_size, scale=1, notices=notices)

@@ -22,11 +22,11 @@ export type Result = {
 export const defaults: Settings = {
   mode: "color",
   colors: 16,
-  color_precision: 8,
+  color_precision: 6,
   smoothing: 1,
   detail: 2,
   speckle: 4,
   corner: 1,
-  simplify: 0,
+  simplify: 1,
   remove_background: false,
 };

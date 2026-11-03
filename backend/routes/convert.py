@@ -58,24 +58,25 @@ async def convert(
                 env = {**os.environ, 'PYTHONPATH': str(root_dir)}
                 result = None
 
-                try:
-                    process = await asyncio.create_subprocess_exec(
-                        sys.executable, '-m', 'backend.worker', directory,
-                        cwd=str(root_dir),
-                        env=env,
-                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-                    )
+                if sys.platform != 'win32':
                     try:
-                        await asyncio.wait_for(process.wait(), timeout=CONVERSION_TIMEOUT)
-                    except TimeoutError:
-                        raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
-                    finally:
-                        if process.returncode is None:
-                            process.kill()
-                            await process.wait()
-                except NotImplementedError:
-                    # Windows event loop (e.g. SelectorEventLoop used by uvicorn --reload)
-                    # does not support asyncio subprocesses. Fall back to threaded execution.
+                        process = await asyncio.create_subprocess_exec(
+                            sys.executable, '-m', 'backend.worker', directory,
+                            cwd=str(root_dir),
+                            env=env,
+                            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                        )
+                        try:
+                            await asyncio.wait_for(process.wait(), timeout=CONVERSION_TIMEOUT)
+                        except TimeoutError:
+                            raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
+                        finally:
+                            if process.returncode is None:
+                                process.kill()
+                                await process.wait()
+                    except (NotImplementedError, OSError):
+                        pass
+                else:
                     def _run_worker():
                         proc = subprocess.Popen(
                             [sys.executable, '-m', 'backend.worker', directory],
@@ -95,11 +96,8 @@ async def convert(
                         await asyncio.to_thread(_run_worker)
                     except subprocess.TimeoutExpired:
                         raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
-                except HTTPException:
-                    # Preserve timeouts instead of retrying unbounded work in-process.
-                    raise
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
 
                 if (target / 'result.json').exists():
                     try:
