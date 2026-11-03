@@ -8,6 +8,9 @@ export type Settings = {
   corner: number;
   simplify: number;
   remove_background: boolean;
+  background_tolerance: number;
+  alpha_threshold: number;
+  mask_expand: number;
 };
 export type Result = {
   id: string;
@@ -29,4 +32,7 @@ export const defaults: Settings = {
   corner: 1,
   simplify: 1,
   remove_background: false,
+  background_tolerance: 10,
+  alpha_threshold: 128,
+  mask_expand: 0,
 };

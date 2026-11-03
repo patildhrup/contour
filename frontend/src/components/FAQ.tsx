@@ -24,7 +24,7 @@ export function FAQ() {
           ],
           [
             "Does Contour use artificial intelligence?",
-            "Contour uses VTracer, a classical image-tracing engine, with image preprocessing. It is not a trained AI model, generative AI, or a guarantee of perfect reconstruction.",
+            "Contour uses a classical subpixel image-tracing engine with image preprocessing. It is not a trained AI model, generative AI, or a guarantee of perfect reconstruction.",
           ],
           [
             "What happens to my uploads?",

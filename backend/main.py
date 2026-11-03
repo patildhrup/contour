@@ -1,11 +1,11 @@
 import backend  # noqa: F401 - Initializes sys.path for local venv
-from importlib.metadata import version
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import CORS_ORIGINS, MAX_UPLOAD_BYTES, MAX_PIXELS, MAX_DIMENSION
 from backend.routes.convert import router
+from backend.routes.export import router as export_router
 
 
 class BodyLimit:
@@ -40,6 +40,7 @@ class BodyLimit:
 
 app = FastAPI(title='Contour API', version='1.0.0')
 app.include_router(router, prefix='/api')
+app.include_router(export_router, prefix='/api')
 app.add_middleware(BodyLimit)
 app.add_middleware(
     CORSMiddleware,
@@ -82,16 +83,10 @@ def root():
 @app.get('/health')
 @app.get('/api/health')
 def health():
-    try:
-        engine_version = version('vtracer')
-        engine_ok = True
-    except Exception:
-        engine_version = 'unavailable'
-        engine_ok = False
     return {
         'status': 'ok',
-        'engine': f'vtracer {engine_version}',
-        'engine_ok': engine_ok,
+        'engine': 'contour-subpixel 1.0',
+        'engine_ok': True,
         'max_upload_bytes': MAX_UPLOAD_BYTES,
         'max_pixels': MAX_PIXELS,
         'max_dimension': MAX_DIMENSION,

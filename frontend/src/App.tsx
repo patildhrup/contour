@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ArrowUpRight,
@@ -8,22 +8,24 @@ import {
   Check,
   X,
   SlidersHorizontal,
-  Layers,
-  LoaderCircle,
 } from "lucide-react";
 
 import { defaults } from "./types";
 import type { Result } from "./types";
 import { Navbar } from "./components/Navbar";
-import { UploadDropzone } from "./components/UploadDropzone";
-import { ConversionSettings } from "./components/ConversionSettings";
-import { BeforeAfterViewer } from "./components/BeforeAfterViewer";
-import { ConversionProgress } from "./components/ConversionProgress";
-import { DownloadPanel } from "./components/DownloadPanel";
 import { FAQ } from "./components/FAQ";
 import { Footer } from "./components/Footer";
+import { readPalette, recolorSvg } from "./utils/palette";
+import { useAuth } from "./auth/AuthContext";
+import { Dashboard } from "./components/Dashboard";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import { Login } from "./components/Login";
+import { WarmHero } from "./components/WarmHero";
+import { WarmFeatures } from "./components/WarmFeatures";
 function getApiBase(): string {
-  const envUrl = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
+  const envUrl = (import.meta.env.VITE_API_BASE_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     // On local environment, use same-origin proxy to local backend (port 8080)
@@ -40,35 +42,16 @@ function getApiBase(): string {
 
 const apiBase = getApiBase();
 
-function makeSample(): Promise<File> {
-  const canvas = document.createElement("canvas");
-  canvas.width = 720;
-  canvas.height = 720;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "#efe9dc";
-  ctx.fillRect(0, 0, 720, 720);
-  ctx.translate(360, 360);
-  for (let i = 0; i < 8; i++) {
-    ctx.save();
-    ctx.rotate((i * Math.PI) / 4);
-    ctx.fillStyle = i % 2 ? "#f0502b" : "#232c29";
-    ctx.beginPath();
-    ctx.ellipse(0, -135, 67, 143, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
-  ctx.fillStyle = "#efe9dc";
-  ctx.beginPath();
-  ctx.arc(0, 0, 61, 0, Math.PI * 2);
-  ctx.fill();
-  return new Promise((resolve) =>
-    canvas.toBlob(
-      (blob) =>
-        resolve(new File([blob!], "contour-flower.png", { type: "image/png" })),
-      "image/png",
-    ),
-  );
-}
+/* Lightweight History-API routing: "/" = landing, "/dashboard" = studio,
+   "/login" = auth page. /dashboard is protected — guests are redirected. */
+type View = "landing" | "dashboard" | "login";
+const viewFromPath = (): View => {
+  const path = window.location.pathname;
+  if (path.startsWith("/dashboard")) return "dashboard";
+  if (path.startsWith("/login")) return "login";
+  return "landing";
+};
+
 function useObjectUrl(blob: Blob | null) {
   const [url, setUrl] = useState("");
   useEffect(() => {
@@ -83,19 +66,81 @@ function useObjectUrl(blob: Blob | null) {
   return url;
 }
 export default function App() {
+  const { user, loading } = useAuth();
+  const [currentView, setCurrentView] = useState<View>(viewFromPath);
   const [file, setFile] = useState<File | null>(null);
-  const [sample, setSample] = useState<File | null>(null);
   const [settings, setSettings] = useState(defaults);
   const [result, setResult] = useState<Result | null>(null);
-  const [blob, setBlob] = useState<Blob | null>(null);
+  const [paletteMapping, setPaletteMapping] = useState<Record<string, string>>(
+    {},
+  );
+
+  const navigate = useCallback((view: View, replace = false) => {
+    setCurrentView(view);
+    const path =
+      view === "dashboard"
+        ? "/dashboard"
+        : view === "login"
+          ? "/login"
+          : "/";
+    if (window.location.pathname !== path) {
+      if (replace) window.history.replaceState({}, "", path);
+      else window.history.pushState({}, "", path);
+    }
+  }, []);
+
+  // Keep the view in sync with browser back / forward
+  useEffect(() => {
+    const onPopState = () => setCurrentView(viewFromPath());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  // Automatically open the /dashboard route upon successful login
+  useEffect(() => {
+    if (user) {
+      navigate("dashboard");
+    }
+  }, [user, navigate]);
+
+  // Route guard: /dashboard requires an account — guests go to /login
+  useEffect(() => {
+    if (!loading && !user && currentView === "dashboard") {
+      navigate("login", true);
+    }
+  }, [loading, user, currentView, navigate]);
+  const [convertedSettings, setConvertedSettings] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [modal, setModal] = useState("");
   const request = useRef<AbortController | null>(null);
   const convertedOnce = useRef(false);
+  const retraceTimer = useRef<number | undefined>(undefined);
   const selection = useRef(0);
   const modalRef = useRef<HTMLDialogElement>(null);
+  const settingsKey = JSON.stringify(settings);
+  const latestSettingsKey = useRef(settingsKey);
+  latestSettingsKey.current = settingsKey;
+  const stale = !!result && convertedSettings !== settingsKey;
+  const colors = useMemo(() => readPalette(result?.svg || ""), [result?.svg]);
+  const editedResult = useMemo(
+    () =>
+      result
+        ? {
+            ...result,
+            svg: recolorSvg(result.svg, paletteMapping),
+          }
+        : null,
+    [result, paletteMapping],
+  );
+  const blob = useMemo(
+    () =>
+      editedResult
+        ? new Blob([editedResult.svg], { type: "image/svg+xml" })
+        : null,
+    [editedResult],
+  );
   const [limits, setLimits] = useState({
     max_upload_bytes: 10 * 1024 * 1024,
     max_pixels: 4_000_000,
@@ -118,18 +163,7 @@ export default function App() {
     return () => controller.abort();
   }, []);
   const originalUrl = useObjectUrl(file);
-  const sampleUrl = useObjectUrl(sample);
   const vectorUrl = useObjectUrl(blob);
-  useEffect(() => {
-    let alive = true;
-    makeSample().then((f) => {
-      if (alive) setSample(f);
-    });
-    return () => {
-      alive = false;
-      request.current?.abort();
-    };
-  }, []);
   useEffect(() => {
     if (!busy) return;
     const timer = window.setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -144,8 +178,16 @@ export default function App() {
     request.current?.abort();
     setBusy(false);
     setError("");
-    if (!["image/jpeg", "image/png", "image/webp"].includes(f.type)) {
-      setError("Please choose a JPG, PNG or WebP image.");
+    const validTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/bmp",
+      "image/gif",
+      "image/tiff",
+    ];
+    if (f.type && !validTypes.includes(f.type)) {
+      setError("Please choose a PNG, JPEG, WebP, BMP, GIF or TIFF image.");
       return;
     }
     if (f.size > limits.max_upload_bytes) {
@@ -176,11 +218,14 @@ export default function App() {
     convertedOnce.current = false;
     setFile(f);
     setResult(null);
-    setBlob(null);
+    setPaletteMapping({});
+    setConvertedSettings("");
   };
   const convert = async () => {
     if (!file) return;
+    window.clearTimeout(retraceTimer.current);
     const controller = new AbortController();
+    const tracingSettingsKey = settingsKey;
     request.current?.abort();
     request.current = controller;
     setBusy(true);
@@ -208,12 +253,20 @@ export default function App() {
         throw new Error(
           "The server returned an invalid vector result. Please try again.",
         );
-      if (controller.signal.aborted) return;
+      if (
+        controller.signal.aborted ||
+        tracingSettingsKey !== latestSettingsKey.current
+      )
+        return;
       convertedOnce.current = true;
       setResult(json);
-      setBlob(new Blob([json.svg], { type: "image/svg+xml" }));
+      setPaletteMapping({});
+      setConvertedSettings(tracingSettingsKey);
     } catch (e) {
-      if (!controller.signal.aborted)
+      if (
+        !controller.signal.aborted &&
+        tracingSettingsKey === latestSettingsKey.current
+      )
         setError(
           e instanceof TypeError
             ? "The conversion server is unavailable. Start the backend and try again."
@@ -222,218 +275,86 @@ export default function App() {
               : "Something went wrong. Please try again.",
         );
     } finally {
-      if (!controller.signal.aborted) setBusy(false);
+      if (request.current === controller) setBusy(false);
     }
   };
   const convertRef = useRef(convert);
   convertRef.current = convert;
   useEffect(() => {
     if (!file || !convertedOnce.current) return;
-    const timer = window.setTimeout(() => {
+    retraceTimer.current = window.setTimeout(() => {
       void convertRef.current();
     }, 650);
-    return () => window.clearTimeout(timer);
+    return () => window.clearTimeout(retraceTimer.current);
   }, [file, settings]);
+  if (currentView === "login") {
+    return (
+      <>
+        <Navbar
+          onOpenDashboard={() => navigate("dashboard")}
+          onGoToLogin={() => navigate("login")}
+        />
+        <Login onClose={() => navigate("landing")} />
+      </>
+    );
+  }
+
+  if (currentView === "dashboard") {
+    return (
+      <ProtectedRoute fallback={null}>
+        <Dashboard
+        file={file}
+        setFile={(f) => {
+          if (f) void choose(f);
+          else {
+            request.current?.abort();
+            setBusy(false);
+            setFile(null);
+            setResult(null);
+            setPaletteMapping({});
+            setConvertedSettings("");
+          }
+        }}
+        settings={settings}
+        setSettings={(next) => {
+          request.current?.abort();
+          setBusy(false);
+          setSettings(next);
+        }}
+        result={result}
+        editedResult={editedResult}
+        colors={colors}
+        paletteMapping={paletteMapping}
+        setPaletteMapping={setPaletteMapping}
+        busy={busy}
+        stale={stale}
+        onConvert={() => void convert()}
+        originalUrl={originalUrl}
+        vectorUrl={vectorUrl}
+        onBackToLanding={() => navigate("landing")}
+        />
+      </ProtectedRoute>
+    );
+  }
+
   return (
     <>
-      <Navbar />
+      <Navbar
+        onOpenDashboard={() => navigate("dashboard")}
+        onGoToLogin={() => navigate("login")}
+      />
       <main>
-        <section className="hero wrap">
-          <div className="hero-copy">
-            <span className="eyebrow">
-              <span className="live-dot" /> LESS PIXEL. MORE POSSIBILITY.
-            </span>
-            <h1>
-              Turn Any Image
-              <br />
-              Into a{" "}
-              <em>
-                Scalable
-                <br />
-                Vector
-              </em>
-              <span className="period">.</span>
-            </h1>
-            <p>
-              Transform pixel-based images into clean, editable SVG graphics in
-              seconds.
-            </p>
-            <div className="hero-meta">
-              <span>
-                <Check size={14} /> Editable paths
-              </span>
-              <span>
-                <Check size={14} /> Infinitely scalable
-              </span>
-              <span>
-                <Check size={14} /> Yours to keep
-              </span>
-            </div>
-          </div>
-          <div className="hero-art">
-            <div className="art-top">
-              <span>THE BIG PICTURE, REFINED.</span>
-              <ArrowUpRight size={18} />
-            </div>
-            <div className="art-canvas">
-              <img
-                className="demo-original"
-                src="/demo/flower.png"
-                alt="Raster half of sample geometric flower"
-              />
-              <div className="demo-vector">
-                <img
-                  src="/demo/flower.svg"
-                  alt="Genuine traced SVG half of sample geometric flower"
-                />
-              </div>
-              <div className="demo-seam">
-                <span>↔</span>
-              </div>
-              <div className="demo-labels">
-                <span>RASTER</span>
-                <span>TRACED SVG</span>
-              </div>
-              <span className="art-cross tl">+</span>
-              <span className="art-cross br">+</span>
-              <div className="art-caption">
-                <span>01 / REAL TRACING SAMPLE</span>
-                <span>180 × 180 → SVG</span>
-              </div>
-            </div>
-            <div className="art-bottom">
-              <span>Built for your next big idea.</span>
-              <span className="mini-pill">
-                PNG <ArrowRight size={12} /> SVG
-              </span>
-            </div>
-          </div>
-        </section>
-        <section className="workspace wrap" id="workspace">
-          <div className="section-top">
-            <div>
-              <span className="eyebrow">YOUR VECTOR STARTS HERE</span>
-              <h2>Small pixels. Big potential.</h2>
-            </div>
-            <span className="workspace-number">01 — CONVERSION STUDIO</span>
-          </div>
-          <UploadDropzone
-            maxBytes={limits.max_upload_bytes}
-            maxPixels={limits.max_pixels}
-            file={file}
-            onFile={choose}
-            onSample={() => {
-              if (sample) void choose(sample);
-            }}
-            busy={busy}
-          />
-          <div className="workbench">
-            <BeforeAfterViewer
-              original={originalUrl}
-              vector={vectorUrl}
-              sample={sampleUrl}
-              svg={result?.svg || ""}
-              width={result?.width}
-              height={result?.height}
-            />
-            <ConversionSettings
-              value={settings}
-              setValue={setSettings}
-              busy={busy}
-            />
-          </div>
-          <div className="conversion-row">
-            <p>
-              <span className="live-dot" />
-              {busy
-                ? "Tracing paths. This uses your current settings."
-                : result
-                  ? "Conversion complete. Changing a setting retraces automatically."
-                  : file
-                    ? "Image loaded. Make it resolution independent."
-                    : "Choose an image to unlock its next dimension."}
-            </p>
-            <button
-              className="button primary convert"
-              disabled={!file || busy}
-              onClick={convert}
-            >
-              {busy ? (
-                <LoaderCircle size={17} className="spin" />
-              ) : (
-                <Layers size={17} />
-              )}{" "}
-              {busy ? "Converting…" : "Convert to Vector"}
-              {!busy && <ArrowRight size={17} />}
-            </button>
-          </div>
-          <ConversionProgress busy={busy} elapsed={elapsed} />
-          {busy && (
-            <button
-              className="cancel"
-              onClick={() => {
-                request.current?.abort();
-                setBusy(false);
-              }}
-            >
-              Cancel conversion
-            </button>
-          )}
-          {error && (
-            <div className="error" role="alert">
-              <span>{error}</span>
-              <button aria-label="Dismiss error" onClick={() => setError("")}>
-                <X size={16} />
-              </button>
-            </div>
-          )}
-          {result?.warnings?.map((w) => (
-            <p className="warning" key={w}>
-              {w}
-            </p>
-          ))}
-          <DownloadPanel result={result} url={vectorUrl} />
-        </section>
-        <section className="benefits" id="features">
-          <div className="wrap benefits-inner">
-            <div>
-              <span className="eyebrow">NO PIXELS. NO LIMITS.</span>
-              <h2>
-                Made to go
-                <br />
-                <em>beyond the original.</em>
-              </h2>
-            </div>
-            <div className="benefit-list">
-              {[
-                [
-                  "01",
-                  "Crisp at every scale",
-                  "From a business card to a billboard. Keep edges clean at any size.",
-                ],
-                [
-                  "02",
-                  "Every path is yours",
-                  "Real editable SVG paths. Take your work into your favorite design tool.",
-                ],
-                [
-                  "03",
-                  "A more flexible finish",
-                  "Tune the palette, smooth your curves, and make space for what matters.",
-                ],
-              ].map(([n, title, description]) => (
-                <article key={n}>
-                  <span>{n}</span>
-                  <div>
-                    <h3>{title}</h3>
-                    <p>{description}</p>
-                  </div>
-                  <ArrowUpRight size={20} />
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
+        {/* Section 1: Warm Hero with Tilted Frosted Phone, Stickers, QR card, Golden Heart Logo */}
+        <WarmHero
+          onExplore={() =>
+            document.getElementById("features")?.scrollIntoView({ behavior: "smooth" })
+          }
+        />
+
+        {/* Section 2: Four Link Cards (Features) with chunky 3D gold-and-black illustrations */}
+        <WarmFeatures />
+
+        {/* Conversion workspace lives in the Dashboard (Open Studio) */}
         <section className="how wrap" id="how-it-works">
           <div className="section-top">
             <div>
@@ -498,9 +419,9 @@ export default function App() {
             </strong>
           </div>
           <p className="format-note">
-            SVG and PDF are scalable vector exports. PNG export provides a raster
-            image. Photographs and complex textures may lose detail or produce
-            large files.
+            SVG and PDF are scalable vector exports. PNG export provides a
+            raster image. Photographs and complex textures may lose detail or
+            produce large files.
           </p>
         </section>
         <section className="pricing wrap" id="pricing">
@@ -512,9 +433,12 @@ export default function App() {
               are currently offered; hosting costs depend on your deployment.
             </p>
           </div>
-          <a className="button secondary" href="#workspace">
+          <button
+            className="button secondary"
+            onClick={() => navigate("dashboard")}
+          >
             Make your first vector <ArrowUpRight size={16} />
-          </a>
+          </button>
         </section>
         <FAQ />
       </main>

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type {
+  PointerEvent as ReactPointerEvent,
+  WheelEvent as ReactWheelEvent,
+} from "react";
 import { Layers, Move, Minus, Plus, Maximize, RotateCcw } from "lucide-react";
 import { ImagePreview } from "./ImagePreview";
 
@@ -29,7 +32,7 @@ export function BeforeAfterViewer({
   useEffect(() => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
-  }, [original, vector]);
+  }, [original]);
   const reset = () => {
     setZoom(1);
     setPan({ x: 0, y: 0 });
@@ -213,7 +216,9 @@ export function BeforeAfterViewer({
         <div className="zoom-controls">
           <button
             aria-label="Zoom out"
-            onClick={() => setZoom((z) => Math.max(0.25, +(z / 1.25).toFixed(3)))}
+            onClick={() =>
+              setZoom((z) => Math.max(0.25, +(z / 1.25).toFixed(3)))
+            }
           >
             <Minus size={15} />
           </button>

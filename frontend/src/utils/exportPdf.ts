@@ -205,8 +205,9 @@ function parsePathDataToPdf(d: string): string {
       curY = startY;
       prevCtrlX = curX;
       prevCtrlY = curY;
+      cmd = "";
     } else {
-      i++;
+      throw new Error(`Unsupported SVG path command: ${cmd}`);
     }
   }
   return out;
@@ -220,8 +221,8 @@ export function svgToVectorPdfBlob(
   try {
     const parser = new DOMParser();
     const doc = parser.parseFromString(svgString, "image/svg+xml");
+    if (doc.querySelector("parsererror")) return null;
     const pathElements = doc.querySelectorAll("path");
-    if (!pathElements.length) return null;
 
     let pdfStream = `q\n1 0 0 -1 0 ${height} cm\n`;
     let count = 0;
@@ -234,32 +235,45 @@ export function svgToVectorPdfBlob(
       const colorCmd = parseSvgColor(fill);
       if (!colorCmd) continue;
 
-      const transform = el.getAttribute("transform") || "";
-      let tx = 0,
-        ty = 0;
-      const transMatch = transform.match(
-        /translate\(\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)(?:[\s,]+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?))?\s*\)/i,
-      );
-      if (transMatch) {
-        tx = parseFloat(transMatch[1]) || 0;
-        ty = parseFloat(transMatch[2]) || 0;
-      }
-
       pdfStream += "q\n";
-      if (tx !== 0 || ty !== 0) {
-        pdfStream += `1 0 0 1 ${tx.toFixed(4)} ${ty.toFixed(4)} cm\n`;
+      // Apply group transforms before each path's local transform, preserving
+      // the original coordinate system in genuinely vector PDF output.
+      const ancestors: Element[] = [];
+      for (let node: Element | null = el; node; node = node.parentElement) {
+        ancestors.unshift(node);
+      }
+      for (const node of ancestors) {
+        const transform = (node as SVGGraphicsElement).transform?.baseVal;
+        if (node.hasAttribute("transform") && !transform) return null;
+        if (transform?.numberOfItems) {
+          const matrix = transform.consolidate()?.matrix;
+          if (!matrix) return null;
+          pdfStream += `${[matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f].join(" ")} cm\n`;
+        }
       }
       pdfStream += colorCmd + "\n";
+      // Seam strokes painted with the fill colour become fill+stroke (B/B*).
+      const strokeColor = el.getAttribute("stroke") || "";
+      const strokeCmd = strokeColor ? parseSvgColor(strokeColor)?.replace(/rg$/, "RG") : null;
+      const strokeWidth = parseFloat(el.getAttribute("stroke-width") || "");
+      const hasStroke = Boolean(strokeCmd) && isFinite(strokeWidth) && strokeWidth > 0;
+      if (hasStroke) {
+        pdfStream += `${strokeCmd}\n${strokeWidth.toFixed(3)} w\n`;
+        if ((el.getAttribute("stroke-linejoin") || "").toLowerCase() === "round") {
+          pdfStream += "1 j\n";
+        }
+      }
       pdfStream += parsePathDataToPdf(d);
 
       const fillRule =
         el.getAttribute("fill-rule")?.toLowerCase() === "evenodd" ? "f*" : "f";
-      pdfStream += `${fillRule}\nQ\n`;
+      const paintOp = hasStroke ? fillRule === "f*" ? "B*" : "B" : fillRule;
+      pdfStream += `${paintOp}\nQ\n`;
       count++;
     }
 
     pdfStream += "Q\n";
-    if (count === 0) return null;
+    if (pathElements.length && count === 0) return null;
 
     const streamBytes = new TextEncoder().encode(pdfStream);
     const objects = [
@@ -364,7 +378,7 @@ export async function svgToCanvasPdfBlob(
   });
 }
 
-export async function exportPdf(result: Result, url: string): Promise<void> {
+export async function exportPdf(result: Result, _url: string): Promise<void> {
   let pdfBlob: Blob | null = null;
   try {
     pdfBlob = svgToVectorPdfBlob(result.svg, result.width, result.height);
@@ -372,7 +386,7 @@ export async function exportPdf(result: Result, url: string): Promise<void> {
     pdfBlob = null;
   }
   if (!pdfBlob) {
-    pdfBlob = await svgToCanvasPdfBlob(url, result.width, result.height);
+    throw new Error("The result could not be exported as a vector PDF.");
   }
   const link = document.createElement("a");
   const pdfUrl = URL.createObjectURL(pdfBlob);

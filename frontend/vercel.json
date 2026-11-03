@@ -3,6 +3,14 @@
     {
       "source": "/api/:path*",
       "destination": "https://contour-backend.vercel.app/api/:path*"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/"
+    },
+    {
+      "source": "/login",
+      "destination": "/"
     }
   ]
 }

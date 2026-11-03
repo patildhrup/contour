@@ -20,6 +20,21 @@ export function ConversionSettings({
         <h3>Trace settings</h3>
       </div>
       <fieldset disabled={busy}>
+        <legend className="sr-only">Vector tracing and mask settings</legend>
+        <div className="curve-presets segmented" aria-label="Curve finish presets">
+          <button type="button"
+            aria-pressed={value.smoothing === 2 && value.corner === 0 && value.simplify === 2 && value.detail === 2}
+            onClick={() => setValue({ ...value, smoothing: 2, corner: 0, simplify: 2, detail: 2 })}>
+            Clean curves
+          </button>
+          <button type="button"
+            aria-pressed={value.smoothing === 1 && value.corner === 2 && value.simplify === 0 && value.detail === 3}
+            onClick={() => setValue({ ...value, smoothing: 1, corner: 2, simplify: 0, detail: 3 })}>
+            Fine detail
+          </button>
+        </div>
+        <p className="setting-help">Clean curves softens contour noise. Fine detail keeps small features and more corners.</p>
+        <h4 className="settings-section">01 / Color &amp; curves</h4>
         <label className="setting-label" htmlFor="mode">
           Color mode
         </label>
@@ -32,7 +47,7 @@ export function ConversionSettings({
           <option value="monochrome">Black & white</option>
         </select>
         <label className="setting-label" htmlFor="colors">
-          Color count <span>{value.colors}</span>
+          Palette limit <span>{value.colors}</span>
         </label>
         <input
           id="colors"
@@ -114,6 +129,7 @@ export function ConversionSettings({
           <option value="1">Balanced</option>
           <option value="2">Aggressive</option>
         </select>
+        <h4 className="settings-section">02 / Background &amp; mask</h4>
         <label className="checkbox-label">
           <input
             type="checkbox"
@@ -122,9 +138,52 @@ export function ConversionSettings({
           />
           Remove near-white background
         </label>
+        <label className="setting-label" htmlFor="background_tolerance">
+          White tolerance <span>{value.background_tolerance}</span>
+        </label>
+        <input
+          id="background_tolerance"
+          type="range"
+          min="0"
+          max="120"
+          value={value.background_tolerance}
+          disabled={!value.remove_background}
+          onChange={(e) => update("background_tolerance", +e.target.value)}
+        />
+        <p className="setting-help mask-help">
+          Higher tolerance removes darker near-white pixels, including white
+          details inside the artwork.
+        </p>
+        <label className="setting-label" htmlFor="alpha_threshold">
+          Opacity cutoff{" "}
+          <span>{Math.round((value.alpha_threshold / 255) * 100)}%</span>
+        </label>
+        <input
+          id="alpha_threshold"
+          type="range"
+          min="1"
+          max="254"
+          value={value.alpha_threshold}
+          onChange={(e) => update("alpha_threshold", +e.target.value)}
+        />
+        <label className="setting-label" htmlFor="mask_expand">
+          Mask expansion{" "}
+          <span>
+            {value.mask_expand > 0 ? "+" : ""}
+            {value.mask_expand} px
+          </span>
+        </label>
+        <input
+          id="mask_expand"
+          type="range"
+          min="-5"
+          max="5"
+          value={value.mask_expand}
+          onChange={(e) => update("mask_expand", +e.target.value)}
+        />
         <p className="setting-help">
-          Changing a control retraces the image. Transparency is traced as a
-          binary mask.
+          Positive expansion fills mask edges; negative values trim them. After
+          your first conversion, changes retrace automatically.
         </p>
       </fieldset>
       <button

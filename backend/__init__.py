@@ -1,7 +1,7 @@
 import os
 import sys
 
-# Ensure local virtual environment packages (such as vtracer) are accessible
+# Ensure local virtual environment packages are accessible
 # even if uvicorn is launched with the base/system Python interpreter.
 _venv_site_packages = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", ".venv", "Lib", "site-packages")

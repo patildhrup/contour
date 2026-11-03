@@ -2,7 +2,6 @@ fastapi==0.156.4
 uvicorn==0.54.0
 python-multipart==0.0.32
 pillow==13.0.0
-vtracer==0.6.15
 numpy==2.5.4
 python-dotenv==1.2.4
 

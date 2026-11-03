@@ -31,8 +31,13 @@ async def convert(
     remove_background: Annotated[bool, Form()] = False,
 ):
     try:
-        if file.content_type not in ('image/png', 'image/jpeg', 'image/webp'):
-            raise HTTPException(415, 'Choose a PNG, JPEG or WebP image.')
+        _ACCEPTED = {
+            'image/png', 'image/jpeg', 'image/webp',
+            'image/bmp', 'image/gif', 'image/tiff', 'image/x-tiff',
+            'application/octet-stream',
+        }
+        if file.content_type not in _ACCEPTED:
+            raise HTTPException(415, 'Choose a PNG, JPEG, WebP, BMP, GIF or TIFF image.')
         data = await file.read(MAX_UPLOAD_BYTES + 1)
         if len(data) > MAX_UPLOAD_BYTES:
             raise HTTPException(413, 'This image exceeds the upload size limit.')
@@ -115,6 +120,10 @@ async def convert(
                         raise HTTPException(422, str(exc))
                     except Exception:
                         raise HTTPException(422, 'The tracing engine could not process this image. Try another image.')
+                    except Exception as exc:
+                        import traceback, logging
+                        logging.error('Tracing failed: %s\n%s', exc, traceback.format_exc())
+                        raise HTTPException(422, f'Tracing error: {exc}')
 
                 if 'error' in result:
                     raise HTTPException(422, result['error'])

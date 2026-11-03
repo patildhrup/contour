@@ -6,15 +6,17 @@ import { exportPdf } from "../utils/exportPdf";
 export function DownloadPanel({
   result,
   url,
+  disabled = false,
 }: {
   result: Result | null;
   url: string;
+  disabled?: boolean;
 }) {
   const [error, setError] = useState("");
-  const [exporting, setExporting] = useState<"png" | "pdf" | null>(null);
+  const [exporting, setExporting] = useState<"png" | "pdf" | "eps" | null>(null);
 
   const exportPng = () => {
-    if (!result || !url || exporting) return;
+    if (!result || !url || exporting || disabled) return;
     setError("");
     setExporting("png");
     const img = new Image();
@@ -56,13 +58,38 @@ export function DownloadPanel({
   };
 
   const handleExportPdf = async () => {
-    if (!result || !url || exporting) return;
+    if (!result || !url || exporting || disabled) return;
     setError("");
     setExporting("pdf");
     try {
       await exportPdf(result, url);
     } catch {
       setError("PDF export failed. Please download the SVG instead.");
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportEps = async () => {
+    if (!result || exporting || disabled) return;
+    setError("");
+    setExporting("eps");
+    try {
+      const apiBase = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
+      const res = await fetch(`${apiBase}/api/export/eps`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ svg: result.svg, filename: result.filename }),
+      });
+      if (!res.ok) throw new Error("EPS export failed");
+      const blob = await res.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = result.filename.replace(/\.svg$/i, ".eps");
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    } catch {
+      setError("EPS export failed. Please download the SVG instead.");
     } finally {
       setExporting(null);
     }
@@ -77,10 +104,13 @@ export function DownloadPanel({
     );
 
   return (
-    <div className="download-panel">
+    <div className={`download-panel ${disabled ? "download-pending" : ""}`}>
       <div>
         <strong>
-          <Check size={16} /> Your vector is ready.
+          <Check size={16} />{" "}
+          {disabled
+            ? "Downloads paused while settings update."
+            : "Your vector is ready."}
         </strong>
         <p>
           {result.paths.toLocaleString()} paths · {result.width} ×{" "}
@@ -92,7 +122,7 @@ export function DownloadPanel({
           type="button"
           className="button secondary"
           onClick={handleExportPdf}
-          disabled={!!exporting}
+          disabled={!!exporting || disabled}
           title="Download vector as PDF document"
         >
           {exporting === "pdf" ? (
@@ -105,8 +135,22 @@ export function DownloadPanel({
         <button
           type="button"
           className="button secondary"
+          onClick={exportEps}
+          disabled={!!exporting || disabled}
+          title="Download vector as EPS (PostScript)"
+        >
+          {exporting === "eps" ? (
+            <LoaderCircle size={15} className="spin" />
+          ) : (
+            <Download size={15} />
+          )}
+          EPS <span>(vector)</span>
+        </button>
+        <button
+          type="button"
+          className="button secondary"
           onClick={exportPng}
-          disabled={!!exporting}
+          disabled={!!exporting || disabled}
           title="Download vector rasterized as PNG"
         >
           {exporting === "png" ? (
@@ -118,7 +162,12 @@ export function DownloadPanel({
         </button>
         <a
           className="button primary"
-          href={url}
+          href={disabled ? undefined : url}
+          aria-disabled={disabled}
+          tabIndex={disabled ? -1 : 0}
+          onClick={(event) => {
+            if (disabled) event.preventDefault();
+          }}
           download={result.filename}
           title="Download genuine SVG vector file"
         >

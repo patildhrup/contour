@@ -1,4 +1,4 @@
-"""Reproducible, original demo artwork plus actual VTracer result."""
+"""Reproducible, original demo artwork plus actual traced result."""
 import io
 import math
 from pathlib import Path
