@@ -281,12 +281,18 @@ export default function App() {
   const convertRef = useRef(convert);
   convertRef.current = convert;
   useEffect(() => {
-    if (!file || !convertedOnce.current) return;
-    retraceTimer.current = window.setTimeout(() => {
-      void convertRef.current();
-    }, 650);
+    if (!file) return;
+    // Already traced with these exact settings — nothing to do
+    if (convertedOnce.current && convertedSettings === settingsKey) return;
+    // First upload traces immediately; later setting tweaks debounce
+    retraceTimer.current = window.setTimeout(
+      () => {
+        void convertRef.current();
+      },
+      convertedOnce.current ? 650 : 60,
+    );
     return () => window.clearTimeout(retraceTimer.current);
-  }, [file, settings]);
+  }, [file, settingsKey, convertedSettings]);
   if (currentView === "login") {
     return (
       <>

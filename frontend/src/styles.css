@@ -4662,3 +4662,94 @@ dialog p {
     max-height: 46vh;
   }
 }
+
+/* ── Compare: Original & Contour on separate planes ─────────────────── */
+.studio-dual-container {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 26px;
+  padding: 22px 24px;
+}
+.studio-plane {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.studio-plane-card {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  padding: 16px;
+}
+.studio-plane-card img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+}
+.studio-plane-card .studio-svg-render {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+}
+/* Keep the contour inside its plane card — the global 80vw/80vh cap
+   overflows the half-width card badly */
+.studio-plane-card .studio-svg-render svg {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  display: block;
+}
+.studio-plane-card .studio-loading-placeholder {
+  color: var(--muted);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+.studio-plane-label {
+  align-self: center;
+  padding: 5px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.studio-plane:first-child .studio-plane-label {
+  color: rgba(26, 18, 0, 0.65);
+}
+.studio-plane:last-child .studio-plane-label {
+  background: linear-gradient(145deg, #ffc933, #ffb800);
+  border-color: transparent;
+  color: var(--ink);
+  box-shadow: 0 4px 12px rgba(255, 184, 0, 0.35);
+}
+@media (max-width: 760px) {
+  .studio-dual-container {
+    flex-direction: column;
+    gap: 14px;
+    padding: 14px;
+    overflow: auto;
+  }
+  .studio-plane-card {
+    padding: 10px;
+  }
+}

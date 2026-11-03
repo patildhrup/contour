@@ -24,8 +24,6 @@ import {
   X,
   Upload,
   LoaderCircle,
-  ThumbsUp,
-  ThumbsDown,
   Sparkles,
   Home,
   LogOut,
@@ -95,7 +93,6 @@ export function Dashboard({
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [exporting, setExporting] = useState<"png" | "pdf" | "eps" | null>(null);
   const [exportError, setExportError] = useState("");
-  const [liked, setLiked] = useState<boolean | null>(null);
 
   // Inspector cursor circle
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
@@ -128,7 +125,14 @@ export function Dashboard({
 
   // Pointer panning & inspection ring
   const handlePointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if ((e.target as HTMLElement).closest(".split-handle, button, input")) return;
+    // Never capture pan on interactive targets — pointer capture would
+    // swallow their click (e.g. the "Browse files" label opening the picker)
+    if (
+      (e.target as HTMLElement).closest(
+        ".split-handle, button, input, label, a, select, .studio-upload-box",
+      )
+    )
+      return;
     dragStartRef.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
@@ -366,26 +370,6 @@ export function Dashboard({
               1:1
             </button>
             <div className="studio-zoom-level">{Math.round(zoom * 100)}%</div>
-          </div>
-
-          <div className="studio-divider" />
-
-          {/* Feedback buttons */}
-          <div className="studio-feedback-actions">
-            <button
-              className={`studio-icon-btn ${liked === true ? "liked" : ""}`}
-              onClick={() => setLiked(liked === true ? null : true)}
-              title="Thumbs up"
-            >
-              <ThumbsUp size={15} />
-            </button>
-            <button
-              className={`studio-icon-btn ${liked === false ? "disliked" : ""}`}
-              onClick={() => setLiked(liked === false ? null : false)}
-              title="Thumbs down"
-            >
-              <ThumbsDown size={15} />
-            </button>
           </div>
         </div>
 
@@ -1079,6 +1063,7 @@ export function Dashboard({
                       onChange={(e) => {
                         const f = e.target.files?.[0];
                         if (f) setFile(f);
+                        e.target.value = "";
                       }}
                     />
                   </label>
@@ -1099,51 +1084,39 @@ export function Dashboard({
                 />
               )}
 
-              {/* Mode 1: COMPARE (Split Slider) */}
+              {/* Mode 1: COMPARE — Original & Contour on separate planes */}
               {viewMode === "compare" && (
                 <div
-                  className="studio-split-container"
+                  className="studio-dual-container"
                   style={{
                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                   }}
                 >
-                  {/* Left: Original raster */}
-                  <div className="studio-layer original-layer">
-                    <img src={currentDisplayUrl} alt="Original raster" draggable={false} />
-                    <div className="studio-badge-overlay left">Original</div>
-                  </div>
-
-                  {/* Right: Vector result (clipped by splitPos) */}
-                  <div
-                    className="studio-layer vector-layer"
-                    style={{ clipPath: `inset(0 0 0 ${splitPos}%)` }}
-                  >
-                    {editedResult?.svg ? (
-                      <div
-                        className="studio-svg-render"
-                        dangerouslySetInnerHTML={{ __html: editedResult.svg }}
+                  <div className="studio-plane">
+                    <div className="studio-plane-card">
+                      <img
+                        src={currentDisplayUrl}
+                        alt="Original raster"
+                        draggable={false}
                       />
-                    ) : (
-                      <img src={currentDisplayUrl} alt="Preview" draggable={false} />
-                    )}
-                    <div className="studio-badge-overlay right">Contour Result</div>
+                    </div>
+                    <div className="studio-plane-label">Original</div>
                   </div>
 
-                  {/* Draggable Divider Bar */}
-                  <div
-                    className="studio-split-divider"
-                    style={{ left: `${splitPos}%` }}
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      isDraggingSplitRef.current = true;
-                      e.currentTarget.setPointerCapture(e.pointerId);
-                    }}
-                  >
-                    <div className="split-handle-line" />
-                    <div className="split-handle-knob">
-                      <ChevronLeft size={12} />
-                      <ChevronRight size={12} />
+                  <div className="studio-plane">
+                    <div className="studio-plane-card">
+                      {editedResult?.svg ? (
+                        <div
+                          className="studio-svg-render"
+                          dangerouslySetInnerHTML={{ __html: editedResult.svg }}
+                        />
+                      ) : (
+                        <div className="studio-loading-placeholder">
+                          {busy ? "Tracing contours…" : "Awaiting trace…"}
+                        </div>
+                      )}
                     </div>
+                    <div className="studio-plane-label">Contour</div>
                   </div>
                 </div>
               )}
