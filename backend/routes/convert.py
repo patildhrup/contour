@@ -49,6 +49,10 @@ async def convert(
             raise HTTPException(429, 'All converters are busy. Please retry in a moment.', headers={'Retry-After': '3'})
         started = time.monotonic()
         root_dir = Path(__file__).resolve().parents[2]
+        # Out-of-process tracing needs the repo layout (<root>/backend/worker.py).
+        # Serverless deployments (e.g. Vercel) flatten backend/ to the task root,
+        # so the subprocess route is skipped there and tracing runs in-process.
+        worker_available = (root_dir / 'backend' / 'worker.py').is_file()
         settings = {
             'mode': mode, 'colors': colors, 'color_precision': color_precision,
             'smoothing': smoothing, 'detail': detail, 'speckle': speckle,
@@ -65,20 +69,21 @@ async def convert(
 
                 if sys.platform != 'win32':
                     try:
-                        process = await asyncio.create_subprocess_exec(
-                            sys.executable, '-m', 'backend.worker', directory,
-                            cwd=str(root_dir),
-                            env=env,
-                            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
-                        )
-                        try:
-                            await asyncio.wait_for(process.wait(), timeout=CONVERSION_TIMEOUT)
-                        except TimeoutError:
-                            raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
-                        finally:
-                            if process.returncode is None:
-                                process.kill()
-                                await process.wait()
+                        if worker_available:
+                            process = await asyncio.create_subprocess_exec(
+                                sys.executable, '-m', 'backend.worker', directory,
+                                cwd=str(root_dir),
+                                env=env,
+                                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                            )
+                            try:
+                                await asyncio.wait_for(process.wait(), timeout=CONVERSION_TIMEOUT)
+                            except TimeoutError:
+                                raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
+                            finally:
+                                if process.returncode is None:
+                                    process.kill()
+                                    await process.wait()
                     except (NotImplementedError, OSError):
                         pass
                 else:
@@ -98,7 +103,8 @@ async def convert(
                             raise
 
                     try:
-                        await asyncio.to_thread(_run_worker)
+                        if worker_available:
+                            await asyncio.to_thread(_run_worker)
                     except subprocess.TimeoutExpired:
                         raise HTTPException(504, 'Conversion took too long. Reduce image dimensions or detail and retry.')
                     except Exception:
@@ -118,12 +124,12 @@ async def convert(
                         result = await asyncio.to_thread(trace, data, file.content_type, settings)
                     except ImageError as exc:
                         raise HTTPException(422, str(exc))
-                    except Exception:
-                        raise HTTPException(422, 'The tracing engine could not process this image. Try another image.')
+                    except HTTPException:
+                        raise
                     except Exception as exc:
                         import traceback, logging
                         logging.error('Tracing failed: %s\n%s', exc, traceback.format_exc())
-                        raise HTTPException(422, f'Tracing error: {exc}')
+                        raise HTTPException(422, 'The tracing engine could not process this image. Try another image.')
 
                 if 'error' in result:
                     raise HTTPException(422, result['error'])
