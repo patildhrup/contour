@@ -16,6 +16,12 @@ import { Navbar } from "./components/Navbar";
 import { FAQ } from "./components/FAQ";
 import { Footer } from "./components/Footer";
 import { readPalette, recolorSvg } from "./utils/palette";
+import {
+  buildLayers,
+  mergeLayers,
+  serializeLayers,
+  type Layer,
+} from "./utils/regions";
 import { useAuth } from "./auth/AuthContext";
 import { Dashboard } from "./components/Dashboard";
 import { ProtectedRoute } from "./components/ProtectedRoute";
@@ -74,6 +80,8 @@ export default function App() {
   const [paletteMapping, setPaletteMapping] = useState<Record<string, string>>(
     {},
   );
+  const [layers, setLayers] = useState<Layer[]>([]);
+  const [crop, setCrop] = useState("");
 
   const navigate = useCallback((view: View, replace = false) => {
     setCurrentView(view);
@@ -119,7 +127,7 @@ export default function App() {
   const retraceTimer = useRef<number | undefined>(undefined);
   const selection = useRef(0);
   const modalRef = useRef<HTMLDialogElement>(null);
-  const settingsKey = JSON.stringify(settings);
+  const settingsKey = JSON.stringify({ ...settings, crop });
   const latestSettingsKey = useRef(settingsKey);
   latestSettingsKey.current = settingsKey;
   const stale = !!result && convertedSettings !== settingsKey;
@@ -129,10 +137,12 @@ export default function App() {
       result
         ? {
             ...result,
-            svg: recolorSvg(result.svg, paletteMapping),
+            svg: layers.length
+              ? serializeLayers(layers, result, paletteMapping)
+              : recolorSvg(result.svg, paletteMapping),
           }
         : null,
-    [result, paletteMapping],
+    [result, layers, paletteMapping],
   );
   const blob = useMemo(
     () =>
@@ -218,6 +228,7 @@ export default function App() {
     convertedOnce.current = false;
     setFile(f);
     setResult(null);
+    setLayers([]);
     setPaletteMapping({});
     setConvertedSettings("");
   };
@@ -236,6 +247,7 @@ export default function App() {
     Object.entries(settings).forEach(([key, value]) =>
       data.append(key, String(value)),
     );
+    if (crop) data.append("crop", crop);
     try {
       const response = await fetch(`${apiBase}/api/convert`, {
         method: "POST",
@@ -260,6 +272,7 @@ export default function App() {
         return;
       convertedOnce.current = true;
       setResult(json);
+      setLayers(buildLayers(json.regions));
       setPaletteMapping({});
       setConvertedSettings(tracingSettingsKey);
     } catch (e) {
@@ -317,6 +330,7 @@ export default function App() {
             setBusy(false);
             setFile(null);
             setResult(null);
+            setLayers([]);
             setPaletteMapping({});
             setConvertedSettings("");
           }
@@ -332,6 +346,24 @@ export default function App() {
         colors={colors}
         paletteMapping={paletteMapping}
         setPaletteMapping={setPaletteMapping}
+        layers={layers}
+        onToggleLayer={(id) =>
+          setLayers((prev) =>
+            prev.map((l) => (l.id === id ? { ...l, hidden: !l.hidden } : l)),
+          )
+        }
+        onRecolorLayer={(id, fill) =>
+          setLayers((prev) =>
+            prev.map((l) => (l.id === id ? { ...l, fill } : l)),
+          )
+        }
+        onMergeLayers={(ids) => setLayers((prev) => mergeLayers(prev, ids))}
+        onRemoveLayer={(id) =>
+          setLayers((prev) => prev.filter((l) => l.id !== id))
+        }
+        onResetLayers={() => setLayers(buildLayers(result?.regions))}
+        crop={crop}
+        setCrop={setCrop}
         busy={busy}
         stale={stale}
         onConvert={() => void convert()}

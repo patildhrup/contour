@@ -17,6 +17,23 @@ router = APIRouter()
 slots = asyncio.Semaphore(MAX_CONCURRENT)
 
 
+def _parse_crop(raw: str):
+    """Parse a 'x,y,w,h' pre-crop string into an int tuple, or None."""
+    if not raw or not raw.strip():
+        return None
+    try:
+        parts = [int(round(float(v))) for v in json.loads(raw)] if raw.strip().startswith('[') \
+            else [int(round(float(v))) for v in raw.split(',')]
+    except (ValueError, TypeError):
+        return None
+    return parts if len(parts) == 4 else None
+
+
+def _finish(result: dict, file: UploadFile, started: float) -> dict:
+    stem = re.sub(r'[^a-zA-Z0-9_-]+', '-', (file.filename or 'image').replace('\\', '/').split('/')[-1].rsplit('.', 1)[0]).strip('-')[:60] or 'image'
+    return {**result, 'id': uuid4().hex, 'filename': f'{stem}-contour.svg', 'elapsed_ms': round((time.monotonic() - started) * 1000)}
+
+
 @router.post('/convert')
 async def convert(
     file: Annotated[UploadFile, File()],
@@ -28,7 +45,13 @@ async def convert(
     speckle: Annotated[int, Form(ge=0, le=64)] = 4,
     corner: Annotated[int, Form(ge=0, le=2)] = 1,
     simplify: Annotated[int, Form(ge=0, le=2)] = 0,
+    corner_radius: Annotated[int, Form(ge=0, le=8)] = 0,
     remove_background: Annotated[bool, Form()] = False,
+    background_tolerance: Annotated[int, Form(ge=0, le=120)] = 10,
+    alpha_threshold: Annotated[int, Form(ge=1, le=254)] = 128,
+    mask_expand: Annotated[int, Form(ge=-5, le=5)] = 0,
+    engine: Annotated[Literal['classic', 'ai'], Form()] = 'classic',
+    crop: Annotated[str, Form()] = '',
 ):
     try:
         _ACCEPTED = {
@@ -57,7 +80,45 @@ async def convert(
             'mode': mode, 'colors': colors, 'color_precision': color_precision,
             'smoothing': smoothing, 'detail': detail, 'speckle': speckle,
             'corner': corner, 'simplify': simplify, 'remove_background': remove_background,
+            'corner_radius': corner_radius, 'background_tolerance': background_tolerance,
+            'alpha_threshold': alpha_threshold, 'mask_expand': mask_expand,
         }
+        crop_box = _parse_crop(crop)
+        if crop_box:
+            settings['crop'] = crop_box
+
+        # AI engine: forward to the configured external service. When it is
+        # unset or the call fails, degrade gracefully to the classic tracer and
+        # surface a warning instead of erroring, so the toggle always yields a
+        # vector result.
+        if engine == 'ai':
+            try:
+                from backend.services import deep
+                from backend.services.tracing import trace, ImageError
+                notice = None
+                result = None
+                if deep.configured():
+                    try:
+                        result = await asyncio.to_thread(deep.vectorize, data, file.content_type, settings)
+                    except Exception as exc:
+                        # Any failure talking to the external engine (cold start,
+                        # ZeroGPU quota, an unexpected reply shape) must not turn
+                        # into a 500; degrade to the classic tracer instead.
+                        notice = f'AI engine unavailable ({exc}); used the classic tracer.'
+                else:
+                    notice = 'AI engine is not configured on this deployment; used the classic tracer.'
+                if result is None or 'error' in result:
+                    try:
+                        result = await asyncio.to_thread(trace, data, file.content_type, settings)
+                    except ImageError as inner:
+                        raise HTTPException(422, str(inner))
+                    if 'error' in result:
+                        raise HTTPException(422, result['error'])
+                if notice:
+                    result['warnings'] = list(result.get('warnings', [])) + [notice]
+                return _finish(result, file, started)
+            finally:
+                slots.release()
         try:
             with tempfile.TemporaryDirectory(prefix='contour-') as directory:
                 target = Path(directory)
@@ -135,7 +196,6 @@ async def convert(
                     raise HTTPException(422, result['error'])
         finally:
             slots.release()
-        stem = re.sub(r'[^a-zA-Z0-9_-]+', '-', (file.filename or 'image').replace('\\', '/').split('/')[-1].rsplit('.', 1)[0]).strip('-')[:60] or 'image'
-        return {**result, 'id': uuid4().hex, 'filename': f'{stem}-contour.svg', 'elapsed_ms': round((time.monotonic() - started) * 1000)}
+        return _finish(result, file, started)
     finally:
         await file.close()

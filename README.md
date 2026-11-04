@@ -53,13 +53,16 @@ PDF export preserves path geometry, fill rules and ancestor transforms. Unsuppor
 | detail | 1-3; 2 | Curve segment detail |
 | speckle | 0-64; 4 | Small-region filtering; zero disables |
 | corner | 0-2; 1 | Soft, balanced or sharp corners |
-| simplify | 0-2; API 0, UI 1 | Curve segment simplification |
+| corner_radius | 0-8; 0 | Corner Control: round detected corners by this many pixels (0 keeps them sharp) |
+| simplify | 0-2; API 0, UI 1 | Curve simplification; higher also fuses faint, near-identical adjacent fills |
 | remove_background | boolean; false | Remove near-white pixels throughout the image |
 | background_tolerance | 0-120; 10 | Remove pixels with all RGB channels >= 255 minus tolerance |
 | alpha_threshold | 1-255; 128 | Binary opacity cutoff |
 | mask_expand | -5 to 5; 0 | Foreground mask growth/erosion in pixels |
+| engine | classic / ai; classic | Classic NumPy tracer, or the optional external deep-learning service (falls back to classic when unset) |
+| crop | `x,y,w,h` px; empty | Pre-crop the bitmap before tracing to raise detail and stay within resolution limits |
 
-Success JSON: `{id, svg, width, height, paths, filename, warnings, elapsed_ms}`. API documentation is at http://localhost:8080/docs. Errors cover invalid images/settings (422), unsupported MIME (415), upload limits (413), overload (429), timeout (504) and service errors (500).
+Success JSON: `{id, svg, width, height, paths, scale, regions, palette, filename, warnings, elapsed_ms}`. `regions` is the editable layer list (`{fill, d, bbox}` in traced-pixel space) and `palette` reports detected colours with pixel counts; `scale` maps traced coordinates back to the original image, so the browser can rebuild the same SVG after region edits. API documentation is at http://localhost:8080/docs. Errors cover invalid images/settings (422), unsupported MIME (415), upload limits (413), overload (429), timeout (504) and service errors (500).
 
 ## Limits and image behavior
 
@@ -80,3 +83,38 @@ npm run build
 Regression tests cover subpixel boundary accuracy against analytically generated coverage fixtures, resample/simplify geometry, corner-aware Bezier fitting, exact rectangles, palette limits, transparent foreground quantization, background/alpha thresholds, mask growth/erosion, empty masks, speckle/angular semantics, hole subpaths and seam attributes, trace pixel budgets, and API validation. Browser checks and remaining limits are recorded in `docs/verification.md`.
 
 The tracing engine is original code; third-party dependency licenses remain with their authors.
+
+## Clarity features and the external AI engine
+
+The classic engine now targets higher-clarity output: subpixel coverage tracing with exact shared boundaries, corner-aware cubic fitting with a **Corner Control** rounding radius, **adaptive simplification** that fuses faint adjacent fills, and **shape fitting** that emits round regions as exact SVG arc primitives (and ellipses as four-segment cubics) instead of a node soup. The Studio workspace adds region editing (click to keep/exclude, recolor, merge, remove), palette adjustment, and pre-crop, all reflected in the preview and every export.
+
+The `engine=ai` path is an extension point for a GPU / deep-learning vectorizer managed outside this repository. It targets a **Hugging Face Gradio Space** and calls it through Gradio's own REST API: `POST {base}/gradio_api/call/vectorize` with `{"data": [<base64 image>, <settings json>]}` returns an `event_id`, and `GET {base}/gradio_api/call/vectorize/{event_id}` streams Server-Sent Events whose final `complete` payload is `["<svg>…"]`. Set `AI_ENGINE_URL` to the Space's API host (the backend appends the path) and optional `AI_ENGINE_TOKEN` (a bearer token lets ZeroGPU count against your account's quota). When the URL is unset or the call fails, the route degrades gracefully to the classic tracer and appends a warning, so the AI toggle always yields a vector. Symmetry modelling and GPU acceleration are delegated to that external service and are not implemented in the classic engine.
+
+### Deploying the engine on a Hugging Face Gradio Space
+
+`AI_ENGINE_URL` must be the **API host** (`https://<owner>-<space>.hf.space`), not the `huggingface.co/spaces/...` webpage. Keep the Space on **`sdk: gradio`** — that is what enables **ZeroGPU** (Docker Spaces cannot use it) — and do **not** start your own uvicorn/FastAPI server: the Gradio runtime already binds port 7860, and a second server triggers `[Errno 98] address already in use`. Just define a Gradio app whose API endpoint the backend calls, and end with `demo.launch()`:
+
+```python
+# Contour-ai-engine/app.py — native Gradio Space (ZeroGPU-compatible)
+import base64, json
+import gradio as gr
+
+# TODO: swap in your real vectorizer (CPU now; decorate with @spaces.GPU for a model).
+def vectorize_api(image_b64: str, settings_json: str = "") -> str:
+    raw = base64.b64decode(image_b64)
+    settings = json.loads(settings_json) if settings_json else {}
+    return run_my_tracer(raw, settings)  # -> "<svg …>…</svg>"
+
+with gr.Blocks() as demo:
+    gr.Markdown("# Contour AI Engine")
+    with gr.Row(visible=False):
+        api_in, api_settings, api_out = gr.Textbox(), gr.Textbox(), gr.Textbox()
+    api_btn = gr.Button("api", visible=False)
+    api_btn.click(fn=vectorize_api, inputs=[api_in, api_settings], outputs=api_out,
+                  api_name="vectorize")  # <- backend calls /gradio_api/call/vectorize
+
+if __name__ == "__main__":
+    demo.launch()
+```
+
+Until the Space is **Running** (`/config` returns 200, not 503), selecting **AI** keeps falling back to the classic tracer — which is expected, not an error. Never commit real tokens to `.env.example` (it is tracked); put secrets only in the gitignored `.env` and rotate any that have leaked.

@@ -96,8 +96,24 @@ def _build_svg(regions: list[dict], traced_size: tuple[int, int], original_size:
     return ''.join(parts)
 
 
+def _apply_crop(image: Image.Image, crop) -> Image.Image:
+    """Pre-crop the bitmap before tracing to raise detail and stay in budget."""
+    if not crop:
+        return image
+    try:
+        x, y, w, h = (int(round(float(v))) for v in crop)
+    except (TypeError, ValueError):
+        return image
+    x = max(0, min(image.width - 1, x))
+    y = max(0, min(image.height - 1, y))
+    w = max(1, min(image.width - x, w))
+    h = max(1, min(image.height - y, h))
+    return image.crop((x, y, x + w, y + h))
+
+
 def trace(data: bytes, mime: str, settings: dict) -> dict:
     image = decode(data, mime)
+    image = _apply_crop(image, settings.get('crop'))
     original_size = image.size
     image = _bound_resolution(image)
     traced_size = image.size
@@ -116,10 +132,15 @@ def trace(data: bytes, mime: str, settings: dict) -> dict:
         paths = len(regions)
     if len(svg.encode()) > MAX_SVG_BYTES:
         raise ImageError('The vector is too complex. Try fewer colors, less detail or more noise filtering.')
+    palette = [{'fill': r['fill'], 'count': int(round(r['area'])), 'bbox': r['bbox']}
+               for r in regions]
     return {
         'svg': svg,
         'width': original_size[0],
         'height': original_size[1],
         'paths': paths,
+        'scale': [original_size[0] / traced_size[0], original_size[1] / traced_size[1]],
+        'regions': [{'fill': r['fill'], 'd': r['d'], 'bbox': r['bbox']} for r in regions],
+        'palette': palette,
         'warnings': notices,
     }

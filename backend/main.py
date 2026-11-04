@@ -66,6 +66,9 @@ async def validation_error(request, exc):
 
 @app.exception_handler(Exception)
 async def unexpected_error(request, exc):
+    import logging, traceback
+    logging.getLogger('contour').error(
+        'Unhandled error on %s %s:\n%s', request.method, request.url.path, traceback.format_exc())
     return JSONResponse(status_code=500, content={'detail': 'Conversion is temporarily unavailable. Please try again.'})
 
 

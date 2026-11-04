@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import type { Settings, Result } from "../types";
 import { exportPdf } from "../utils/exportPdf";
+import { type Layer } from "../utils/regions";
 import { useAuth } from "../auth/AuthContext";
 
 type ViewMode = "compare" | "vector" | "outlines";
@@ -48,6 +49,14 @@ type DashboardProps = {
   colors: string[];
   paletteMapping: Record<string, string>;
   setPaletteMapping: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  layers: Layer[];
+  onToggleLayer: (id: number) => void;
+  onRecolorLayer: (id: number, fill: string) => void;
+  onMergeLayers: (ids: number[]) => void;
+  onRemoveLayer: (id: number) => void;
+  onResetLayers: () => void;
+  crop: string;
+  setCrop: (crop: string) => void;
   busy: boolean;
   stale: boolean;
   onConvert: () => void;
@@ -140,6 +149,26 @@ function StudioZoomControls({
   );
 }
 
+// Radial 0-100 progress readout shown in the canvas placeholder while busy.
+function TraceCounter({ progress, label }: { progress: number; label: string }) {
+  return (
+    <div className="trace-counter" role="status" aria-live="polite">
+      <div
+        className="trace-counter-ring"
+        style={{
+          background: `conic-gradient(#22d3ee ${progress * 3.6}deg, rgba(255,255,255,0.10) 0deg)`,
+        }}
+      >
+        <span className="trace-counter-inner">
+          <span className="trace-counter-num">{progress}</span>
+          <span className="trace-counter-pct">%</span>
+        </span>
+      </div>
+      <div className="trace-counter-label">{label}</div>
+    </div>
+  );
+}
+
 export function Dashboard({
   file,
   setFile,
@@ -150,6 +179,14 @@ export function Dashboard({
   colors,
   paletteMapping,
   setPaletteMapping,
+  layers,
+  onToggleLayer,
+  onRecolorLayer,
+  onMergeLayers,
+  onRemoveLayer,
+  onResetLayers,
+  crop,
+  setCrop,
   busy,
   stale,
   onConvert,
@@ -170,6 +207,15 @@ export function Dashboard({
   const [exportError, setExportError] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
 
+  // Estimated 0-100 counter while a conversion runs: the request is a single
+  // round-trip with no live progress feed, so we ease toward 99% and let the
+  // busy flag clearing imply completion.
+  const [progress, setProgress] = useState(0);
+
+  // Region editing: multi-select set and an on-canvas edit toggle.
+  const [selected, setSelected] = useState<number[]>([]);
+  const [regionEdit, setRegionEdit] = useState(false);
+
   // Inspector cursor circle
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -188,6 +234,20 @@ export function Dashboard({
     setZoom(1);
     setPan({ x: 0, y: 0 });
   }, [file]);
+
+  useEffect(() => {
+    if (!busy) {
+      setProgress(0);
+      return;
+    }
+    setProgress(0);
+    const start = Date.now();
+    const id = setInterval(() => {
+      const t = (Date.now() - start) / 1000;
+      setProgress(Math.min(99, Math.round(100 * (1 - Math.exp(-t / 5)))));
+    }, 150);
+    return () => clearInterval(id);
+  }, [busy]);
 
   // The overflow menu only exists on narrow viewports; close it when the
   // layout returns to a full topbar, on Escape, or on an outside click.
@@ -385,6 +445,48 @@ export function Dashboard({
       .replace(/<svg /, '<svg class="outline-svg-rendered" ');
   }, [editedResult?.svg]);
 
+  const toggleSelect = (id: number) =>
+    setSelected((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+
+  // Interactive, region-level SVG used when the Regions tool is editing.
+  const editableSvg =
+    result && layers.length ? (
+      <svg
+        className="studio-editable-svg"
+        width={result.width}
+        height={result.height}
+        viewBox={`0 0 ${result.width} ${result.height}`}
+      >
+        <g
+          transform={`scale(${result.scale?.[0] ?? 1} ${result.scale?.[1] ?? 1})`}
+        >
+          {layers.map((layer) =>
+            layer.hidden ? null : (
+              <path
+                key={layer.id}
+                d={layer.d}
+                fill={paletteMapping[layer.fill.toLowerCase()] || layer.fill}
+                fillRule="evenodd"
+                stroke={selected.includes(layer.id) ? "#22d3ee" : "none"}
+                strokeWidth={selected.includes(layer.id) ? 1.5 : 0}
+                style={{ cursor: regionEdit ? "pointer" : "inherit" }}
+                onPointerDown={(e) => {
+                  if (regionEdit) e.stopPropagation();
+                }}
+                onClick={(e) => {
+                  if (!regionEdit) return;
+                  e.stopPropagation();
+                  toggleSelect(layer.id);
+                }}
+              />
+            ),
+          )}
+        </g>
+      </svg>
+    ) : null;
+
   const totalCornersEstimate = useMemo(() => {
     if (!result?.paths) return 1200;
     return Math.max(120, result.paths * 28);
@@ -454,7 +556,7 @@ export function Dashboard({
           {busy && (
             <div className="studio-status-chip busy" title="Tracing in progress">
               <LoaderCircle size={14} className="spin" />
-              <span>Tracing…</span>
+              <span>Tracing… {progress}%</span>
             </div>
           )}
 
@@ -887,6 +989,25 @@ export function Dashboard({
                     </div>
                   </div>
 
+                  <div className="studio-control-block">
+                    <div className="studio-control-header">
+                      <label>Corner rounding radius</label>
+                      <span className="studio-value-pill">{settings.corner_radius} px</span>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="8"
+                      value={settings.corner_radius}
+                      onChange={(e) => updateSetting("corner_radius", +e.target.value)}
+                      className="studio-range"
+                    />
+                    <div className="studio-range-labels">
+                      <span>Sharp</span>
+                      <span>Rounded</span>
+                    </div>
+                  </div>
+
                   <button
                     className="studio-btn-reset-all"
                     onClick={() => {
@@ -1038,6 +1159,122 @@ export function Dashboard({
               {activeTool === "regions" && (
                 <div className="studio-tool-detail">
                   <h2 className="studio-detail-title">Regions</h2>
+                  <p className="studio-tool-hint">
+                    Select shapes on the canvas to recolor, merge, or remove
+                    them — including clicking out the background.
+                  </p>
+
+                  <div className="studio-toggle-row">
+                    <span>Select regions on canvas</span>
+                    <input
+                      type="checkbox"
+                      checked={regionEdit}
+                      onChange={(e) => {
+                        setRegionEdit(e.target.checked);
+                        if (e.target.checked) setViewMode("vector");
+                        else setSelected([]);
+                      }}
+                      className="studio-checkbox"
+                    />
+                  </div>
+
+                  {layers.length > 0 && (
+                    <div className="studio-region-list">
+                      {layers.map((layer) => (
+                        <div
+                          key={layer.id}
+                          className={`studio-region-row ${selected.includes(layer.id) ? "selected" : ""} ${layer.hidden ? "hidden" : ""}`}
+                        >
+                          <button
+                            type="button"
+                            className="studio-region-select"
+                            onClick={() => toggleSelect(layer.id)}
+                            title="Select for merge / remove"
+                          >
+                            {selected.includes(layer.id) ? <Check size={14} /> : <Square size={14} />}{' '}
+                          </button>
+                          <input
+                            type="color"
+                            value={paletteMapping[layer.fill.toLowerCase()] || layer.fill}
+                            onChange={(e) => onRecolorLayer(layer.id, e.target.value)}
+                            className="studio-color-picker"
+                            title="Recolor this region"
+                          />
+                          <span className="studio-region-meta">
+                            {layer.members.length > 1 ? `merged ×${layer.members.length}` : layer.fill.toUpperCase()}
+                          </span>
+                          <button
+                            type="button"
+                            className="studio-region-eye"
+                            onClick={() => onToggleLayer(layer.id)}
+                            title={layer.hidden ? "Include" : "Exclude"}
+                          >
+                            {layer.hidden ? <X size={14} /> : <Eye size={14} />}
+                          </button>
+                        </div>
+                      ))}
+                      <div className="studio-region-actions">
+                        <button
+                          type="button"
+                          className="studio-btn-secondary"
+                          disabled={selected.length < 2}
+                          onClick={() => {
+                            onMergeLayers(selected);
+                            setSelected([]);
+                          }}
+                        >
+                          <Layers size={13} /> Merge selected
+                        </button>
+                        <button
+                          type="button"
+                          className="studio-btn-secondary"
+                          disabled={selected.length === 0}
+                          onClick={() => {
+                            selected.forEach(onRemoveLayer);
+                            setSelected([]);
+                          }}
+                        >
+                          <Eraser size={13} /> Remove selected
+                        </button>
+                        <button
+                          type="button"
+                          className="studio-text-link"
+                          onClick={() => {
+                            onResetLayers();
+                            setSelected([]);
+                          }}
+                        >
+                          Reset edits
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="studio-control-block">
+                    <div className="studio-control-header">
+                      <label>Pre-crop (x, y, w, h px)</label>
+                    </div>
+                    <input
+                      type="text"
+                      className="studio-text-input"
+                      placeholder="e.g. 40,20,500,500"
+                      value={crop}
+                      onChange={(e) => setCrop(e.target.value.trim())}
+                    />
+                    <div className="studio-range-labels">
+                      <span>Leave blank to trace the full image</span>
+                    </div>
+                    {crop && (
+                      <button
+                        type="button"
+                        className="studio-text-link"
+                        onClick={() => setCrop("")}
+                      >
+                        Clear crop
+                      </button>
+                    )}
+                  </div>
+
                   <div className="studio-control-block">
                     <div className="studio-control-header">
                       <label>Noise filter (speckle)</label>
@@ -1089,6 +1326,10 @@ export function Dashboard({
                       onChange={(e) => updateSetting("simplify", +e.target.value)}
                       className="studio-range"
                     />
+                    <div className="studio-range-labels">
+                      <span>Keep contours</span>
+                      <span>Fuse faint seams</span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1132,6 +1373,30 @@ export function Dashboard({
                       onChange={(e) => updateSetting("smoothing", +e.target.value)}
                       className="studio-range"
                     />
+                  </div>
+
+                  <div className="studio-control-block">
+                    <label className="studio-section-label">Tracing engine</label>
+                    <div className="studio-segmented" style={{ width: "100%", marginTop: 8 }}>
+                      <button
+                        className={`studio-tab ${settings.engine === "classic" ? "active" : ""}`}
+                        onClick={() => updateSetting("engine", "classic")}
+                        style={{ flex: 1 }}
+                      >
+                        Classic
+                      </button>
+                      <button
+                        className={`studio-tab ${settings.engine === "ai" ? "active" : ""}`}
+                        onClick={() => updateSetting("engine", "ai")}
+                        style={{ flex: 1 }}
+                      >
+                        AI (beta)
+                      </button>
+                    </div>
+                    <p className="studio-tool-hint">
+                      AI uses the configured external deep-learning service and
+                      falls back to the classic tracer when it is unavailable.
+                    </p>
                   </div>
                 </div>
               )}
@@ -1245,14 +1510,20 @@ export function Dashboard({
 
                   <div className="studio-plane">
                     <div className="studio-plane-card">
-                      {editedResult?.svg ? (
+                      {regionEdit && editableSvg ? (
+                        <div className="studio-svg-render">{editableSvg}</div>
+                      ) : editedResult?.svg ? (
                         <div
                           className="studio-svg-render"
                           dangerouslySetInnerHTML={{ __html: editedResult.svg }}
                         />
                       ) : (
                         <div className="studio-loading-placeholder">
-                          {busy ? "Tracing contours…" : "Awaiting trace…"}
+                          {busy ? (
+                            <TraceCounter progress={progress} label="Tracing contours…" />
+                          ) : (
+                            "Awaiting trace…"
+                          )}
                         </div>
                       )}
                     </div>
@@ -1269,13 +1540,21 @@ export function Dashboard({
                     transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                   }}
                 >
-                  {editedResult?.svg ? (
+                  {regionEdit && editableSvg ? (
+                    <div className="studio-svg-render">{editableSvg}</div>
+                  ) : editedResult?.svg ? (
                     <div
                       className="studio-svg-render"
                       dangerouslySetInnerHTML={{ __html: editedResult.svg }}
                     />
                   ) : (
-                    <div className="studio-loading-placeholder">Processing vector…</div>
+                    <div className="studio-loading-placeholder">
+                      {busy ? (
+                        <TraceCounter progress={progress} label="Processing vector…" />
+                      ) : (
+                        "Processing vector…"
+                      )}
+                    </div>
                   )}
                   <div className="studio-badge-overlay right">Contour Result</div>
                 </div>

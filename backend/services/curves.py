@@ -89,14 +89,27 @@ def _resample(vertices, spacing):
     return starts + fraction * (ends - starts)
 
 
-def fit_closed(vertices, tolerance=0.6, corner_angle=65., scale=1):
+def _fillet(before, corner, after):
+    """One cubic approximating a rounded corner cut at `before`/`after`.
+
+    The curve leaves `before` along the incoming edge and arrives at `after`
+    along the outgoing edge, so it joins the neighbouring runs tangentially.
+    """
+    d_in = _unit(corner - before)
+    d_out = _unit(after - corner)
+    handle = float(np.linalg.norm(corner - before)) * 0.6
+    return np.array([before, before + d_in * handle,
+                     after - d_out * handle, after])
+
+
+def fit_closed(vertices, tolerance=0.6, corner_angle=65., scale=1, corner_radius=0):
     vertices = np.asarray(vertices, dtype=float)
     if len(vertices) > 1 and np.linalg.norm(vertices[0]-vertices[-1]) < 1e-8:
         vertices = vertices[:-1]
     vertices = vertices[np.r_[True, np.linalg.norm(np.diff(vertices,axis=0),axis=1)>1e-8]]
     if len(vertices) < 3:
         return []
-    if len(vertices) == 4:
+    if len(vertices) == 4 and corner_radius == 0:
         edges = np.roll(vertices,-1,axis=0)-vertices
         lengths = np.linalg.norm(edges,axis=1)
         right_angles = np.abs(np.sum(edges*np.roll(edges,-1,axis=0),axis=1))
@@ -105,7 +118,8 @@ def fit_closed(vertices, tolerance=0.6, corner_angle=65., scale=1):
             # Fairing that fill would accidentally clip the exported corners.
             return [np.array([a,a+(b-a)/3,a+2*(b-a)/3,b])
                     for a,b in zip(vertices,np.roll(vertices,-1,axis=0))]
-    points = _resample(vertices, max(0.75, scale * 0.75))
+    spacing = max(0.75, scale * 0.75)
+    points = _resample(vertices, spacing)
     n = len(points)
     if n < 6 or n > 30000:
         return []
@@ -141,10 +155,26 @@ def fit_closed(vertices, tolerance=0.6, corner_angle=65., scale=1):
         anchors = sorted(corners)
     curves = []
     corner_set = set(corners)
+    # Corner Control: when a radius is set, each sharp corner is cut back by
+    # `trim` resampled points on both edges and bridged with a rounding cubic.
+    trim = int(round(corner_radius / spacing)) if corner_radius > 0 else 0
     for start, end in zip(anchors, anchors[1:]+anchors[:1]):
         indices = np.arange(start, end+1 if end>start else end+n+1)%n
         run = points[indices]
-        left = _unit(run[min(window,len(run)-1)]-run[0]) if start in corner_set else _unit(points[(start+window)%n]-points[(start-window)%n])
-        right = _unit(run[max(0,len(run)-1-window)]-run[-1]) if end in corner_set else _unit(points[(end-window)%n]-points[(end+window)%n])
-        curves.extend(_fit(run,left,right,tolerance))
+        head = trim if (trim > 0 and start in corner_set) else 0
+        tail = trim if (trim > 0 and end in corner_set) else 0
+        if head + tail + 2 > len(run):
+            head = tail = 0
+        interior = run[head: len(run) - tail] if tail else run[head:]
+        if head:
+            left = _unit(interior[0] - points[start])
+        else:
+            left = _unit(run[min(window,len(run)-1)]-run[0]) if start in corner_set else _unit(points[(start+window)%n]-points[(start-window)%n])
+        if tail:
+            right = _unit(interior[-1] - points[end])
+        else:
+            right = _unit(run[max(0,len(run)-1-window)]-run[-1]) if end in corner_set else _unit(points[(end-window)%n]-points[(end+window)%n])
+        curves.extend(_fit(interior, left, right, tolerance))
+        if tail:
+            curves.append(_fillet(interior[-1], points[end], points[(end + trim) % n]))
     return curves

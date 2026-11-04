@@ -184,17 +184,76 @@ def _format(value):
     return text if text not in ('', '-0') else '0'
 
 
-def _path_data(loops, tolerance, corner_angle, simplify_epsilon, min_area):
+def _as_circle(loop, tolerance):
+    """Emit two exact SVG arcs when the loop is round to within tolerance."""
+    centre = loop.mean(axis=0)
+    radii = np.linalg.norm(loop - centre, axis=1)
+    radius = float(radii.mean())
+    if radius < 4.0 or radius > 20000.0:
+        return None
+    if float(np.max(np.abs(radii - radius))) > max(tolerance, 0.02 * radius):
+        return None
+    cx, cy = float(centre[0]), float(centre[1])
+    r = _format(radius)
+    left = f'{_format(cx - radius)} {_format(cy)}'
+    right = f'{_format(cx + radius)} {_format(cy)}'
+    return (f'M{right} A{r} {r} 0 0 1 {left} A{r} {r} 0 0 1 {right} Z')
+
+
+def _as_ellipse(loop, tolerance):
+    """Fit a rotated ellipse; emit four cubic segments when it is a good match."""
+    centre = loop.mean(axis=0)
+    delta = loop - centre
+    covariance = delta.T @ delta / len(delta)
+    values, vectors = np.linalg.eigh(covariance)
+    major = float(np.sqrt(max(2.0 * values[1], 1e-9)))
+    minor = float(np.sqrt(max(2.0 * values[0], 1e-9)))
+    if minor < 4.0 or major / minor > 12.0:
+        return None
+    axes = np.stack((vectors[:, 1], vectors[:, 0]), axis=1)  # major, minor
+    local = delta @ axes
+    residual = np.hypot(local[:, 0] / major, local[:, 1] / minor) - 1.0
+    if float(np.max(np.abs(residual))) * minor > max(tolerance, 0.03 * minor):
+        return None
+    kappa = 0.5522847498307936
+    pts = [(major, 0.0), (0.0, minor), (-major, 0.0), (0.0, -minor)]
+    handles = [(0.0, minor * kappa), (-major * kappa, 0.0),
+               (0.0, -minor * kappa), (major * kappa, 0.0)]
+    segments = []
+    for i in range(4):
+        a, b = pts[i], pts[(i + 1) % 4]
+        c1 = (a[0] + handles[i][0], a[1] + handles[i][1])
+        c2 = (b[0] - handles[(i - 1) % 4][0], b[1] - handles[(i - 1) % 4][1])
+        world = [tuple(axes @ np.array(p) + centre) for p in (a, c1, c2, b)]
+        segments.append(world)
+    head = f'M{_format(segments[0][0][0])} {_format(segments[0][0][1])}'
+    body = ' '.join('C' + ' '.join(f'{_format(p[0])} {_format(p[1])}' for p in seg[1:])
+                    for seg in segments)
+    return f'{head} {body} Z'
+
+
+def _primitive(loop, tolerance):
+    return _as_circle(loop, tolerance) or _as_ellipse(loop, tolerance)
+
+
+def _path_data(loops, tolerance, corner_angle, simplify_epsilon, min_area,
+               corner_radius=0, shape_fit=True):
     """Fit every loop and join them into one even-odd path."""
     parts = []
     for loop in loops:
         if abs(_polygon_area(loop)) < min_area:
             continue
+        if tolerance > 0 and shape_fit and len(loop) >= 12:
+            shape = _primitive(loop, tolerance)
+            if shape:
+                parts.append(shape)
+                continue
         simple = _simplify(loop, simplify_epsilon)
         if len(simple) < 3:
             continue
         if tolerance > 0 and len(simple) <= _MAX_FIT_POINTS:
-            chunks = fit_closed(simple, tolerance=tolerance, corner_angle=corner_angle)
+            chunks = fit_closed(simple, tolerance=tolerance, corner_angle=corner_angle,
+                                corner_radius=corner_radius)
             if not chunks:
                 continue
             head = f'M{_format(chunks[0][0][0])} {_format(chunks[0][0][1])}'
@@ -220,6 +279,8 @@ def trace_regions(labels, palette, coverage, partner, settings):
     simplify = int(settings.get('simplify', 0))
     corner = int(settings.get('corner', 1))
     speckle = int(settings.get('speckle', 4))
+    corner_radius = max(0, int(settings.get('corner_radius', 0)))
+    shape_fit = bool(settings.get('shape_fit', True))
 
     sigma = {0: 0.0, 1: 0.65, 2: 1.0}[smoothing]
     tolerance = {1: 1.0, 2: 0.55, 3: 0.3}[detail]
@@ -249,14 +310,17 @@ def trace_regions(labels, palette, coverage, partner, settings):
         field = _gaussian(field, sigma)
         loops = [loop + (x0, y0) for loop in _iso_loops(field, 0.5)]
         data = _path_data(loops, tolerance if smoothing else 0.0, corner_angle,
-                          simplify_epsilon, min_area)
+                          simplify_epsilon, min_area, corner_radius, shape_fit)
         if not data:
             continue
         area = sum(abs(_polygon_area(loop)) for loop in loops)
+        points = np.concatenate(loops)
+        low, high = points.min(axis=0), points.max(axis=0)
         results.append({
             'fill': '#%02x%02x%02x' % tuple(int(round(v)) for v in colour),
             'd': data,
             'area': area,
+            'bbox': [float(low[0]), float(low[1]), float(high[0]), float(high[1])],
         })
     # Paint large regions first so small details composite on top.
     results.sort(key=lambda item: -item['area'])

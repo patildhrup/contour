@@ -1,6 +1,10 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
+# Load the .env that lives beside this module first (so running uvicorn from
+# the repo root still picks up backend/.env), then fall back to the CWD walk.
+load_dotenv(Path(__file__).resolve().parent / '.env')
 load_dotenv()
 MAX_UPLOAD_BYTES = int(os.getenv('MAX_UPLOAD_BYTES', '20971520'))  # 20 MB
 MAX_PIXELS = int(os.getenv('MAX_PIXELS', '6000000'))  # ~3 megapixels
@@ -11,6 +15,12 @@ MAX_SVG_BYTES = int(os.getenv('MAX_SVG_BYTES', '20971520'))
 # Images larger than this are traced at reduced resolution (results are scaled
 # back to original dimensions), bounding subpixel tracing time.
 TRACE_PIXEL_BUDGET = int(os.getenv('TRACE_PIXEL_BUDGET', '1600000'))
+
+# Optional external deep-learning / GPU vectorization service. When unset the
+# 'ai' engine falls back to the classic tracer with a warning. The provider is
+# managed outside this repo; see README for the request/response contract.
+AI_ENGINE_URL = os.getenv('AI_ENGINE_URL', '').strip()
+AI_ENGINE_TOKEN = os.getenv('AI_ENGINE_TOKEN', '').strip()
 
 DEFAULT_ORIGINS = (
     'http://localhost:5173,http://127.0.0.1:5173,'

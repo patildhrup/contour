@@ -137,6 +137,55 @@ def _merge_palette(labels: np.ndarray, palette: list[tuple[int, int, int]], thre
     return merged, representative
 
 
+def _merge_faint_adjacent(labels, palette, threshold):
+    """Collapse neighbouring colours that touch and barely differ in hue.
+
+    Only pairs sharing a pixel boundary are candidates, so a faint anti-aliased
+    seam between two similar fills is absorbed while distant regions that merely
+    look alike stay separate layers.
+    """
+    if threshold <= 0 or len(palette) < 2:
+        return labels, palette
+    horizontal = np.stack((labels[:, :-1].ravel(), labels[:, 1:].ravel()), axis=1)
+    vertical = np.stack((labels[:-1, :].ravel(), labels[1:, :].ravel()), axis=1)
+    pairs = np.unique(np.concatenate((horizontal, vertical), axis=0), axis=0)
+    pairs = pairs[(pairs[:, 0] != OUTSIDE) & (pairs[:, 1] != OUTSIDE)
+                  & (pairs[:, 0] != pairs[:, 1])]
+    if not len(pairs):
+        return labels, palette
+    colours = np.array(palette, np.float32)
+    parent = list(range(len(palette)))
+
+    def find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    counts = np.array([(labels == index).sum() for index in range(len(palette))])
+    for a, b in pairs:
+        i, j = int(a), int(b)
+        if np.linalg.norm(colours[i] - colours[j]) <= threshold:
+            ra, rb = find(i), find(j)
+            if ra != rb:
+                if counts[ra] < counts[rb]:
+                    ra, rb = rb, ra
+                parent[rb] = ra
+    groups = {}
+    for index in range(len(palette)):
+        groups.setdefault(find(index), len(groups))
+    remap = np.array([groups[find(index)] for index in range(len(palette))], np.int32)
+    if len(set(remap.tolist())) == len(palette):
+        return labels, palette
+    keep = {}
+    for index in range(len(palette)):
+        keep.setdefault(remap[index], index)
+    representative = [palette[keep[target]] for target in sorted(keep)]
+    merged = remap[np.clip(labels, 0, len(palette) - 1)]
+    merged[labels == OUTSIDE] = OUTSIDE
+    return merged, representative
+
+
 def _estimate_coverage(labels: np.ndarray, rgb: np.ndarray, alpha: np.ndarray,
                        palette: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Coverage fraction of each pixel's own label and its blend partner.
@@ -276,6 +325,8 @@ def prepare(image: Image.Image, settings: dict) -> PrepResult:
                                     int(settings.get('colors', 16)))
         labels, palette = _merge_palette(labels, palette,
                                          _MERGE_DISTANCE[int(settings.get('color_precision', 6))])
+        faint = {0: 0, 1: 18, 2: 36}.get(int(settings.get('simplify', 0)), 0)
+        labels, palette = _merge_faint_adjacent(labels, palette, faint)
     labels[~mask] = OUTSIDE
 
     if palette:
