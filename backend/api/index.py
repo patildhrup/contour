@@ -1,10 +1,4 @@
-import sys
-from pathlib import Path
-
-# Legacy entrypoint: backend imports require the repository root, not backend/.
-root_dir = Path(__file__).resolve().parents[2]
-if str(root_dir) not in sys.path:
-    sys.path.insert(0, str(root_dir))
-
-from backend.main import app
-
+# Vercel serverless entrypoint. The package's __init__ installs the sys.path /
+# package aliases needed for the backend's absolute `backend.*` imports, no
+# matter whether the Vercel Root Directory is the repo root or backend/.
+from backend.main import app  # noqa: E402
