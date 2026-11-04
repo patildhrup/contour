@@ -1,5 +1,11 @@
-import { useState } from "react";
-import { User as UserIcon, LogOut, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  User as UserIcon,
+  LogOut,
+  Sparkles,
+  Menu,
+  X,
+} from "lucide-react";
 import { Login } from "./Login";
 import { useAuth } from "../auth/AuthContext";
 
@@ -8,9 +14,41 @@ type NavbarProps = {
   onGoToLogin?: () => void;
 };
 
+// Mirrors the nav breakpoint in styles.css (max-width: 900px).
+const MENU_QUERY = "(max-width: 900px)";
+
 export function Navbar({ onOpenDashboard, onGoToLogin }: NavbarProps) {
   const { user, signOut, loading } = useAuth();
   const [loginOpen, setLoginOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // The hamburger only exists on narrow viewports; drop the open panel when
+  // the layout returns to desktop so it can't linger empty after a resize.
+  useEffect(() => {
+    const wide = window.matchMedia(`not all and ${MENU_QUERY}`);
+    const close = () => setMenuOpen(false);
+    wide.addEventListener("change", close);
+    return () => wide.removeEventListener("change", close);
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".warm-nav-shell")) setMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [menuOpen]);
+
+  const closeMenu = () => setMenuOpen(false);
 
   const handleSignOut = async () => {
     try {
@@ -20,6 +58,17 @@ export function Navbar({ onOpenDashboard, onGoToLogin }: NavbarProps) {
     } catch {
       // handled in context
     }
+  };
+
+  const openDashboard = () => {
+    closeMenu();
+    onOpenDashboard?.();
+  };
+
+  const openLogin = () => {
+    closeMenu();
+    if (onGoToLogin) onGoToLogin();
+    else setLoginOpen(true);
   };
 
   const displayName =
@@ -117,7 +166,97 @@ export function Navbar({ onOpenDashboard, onGoToLogin }: NavbarProps) {
               </button>
             </div>
           )}
+
+          {/* Mobile: collapses links + account actions into a dropdown panel */}
+          <button
+            className="warm-nav-toggle"
+            type="button"
+            aria-expanded={menuOpen}
+            aria-controls="warm-nav-menu"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            {menuOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
         </nav>
+
+        {menuOpen && (
+          <div className="warm-nav-menu" id="warm-nav-menu">
+            <div className="warm-nav-menu-links">
+              <a href="#features" onClick={closeMenu}>
+                Features
+              </a>
+              <a href="#how-it-works" onClick={closeMenu}>
+                How it works
+              </a>
+              <button type="button" onClick={openDashboard}>
+                Vectorize
+              </button>
+              <a href="#pricing" onClick={closeMenu}>
+                Pricing
+              </a>
+            </div>
+
+            <div className="warm-nav-menu-actions">
+              {user ? (
+                <>
+                  <div className="warm-nav-menu-account">
+                    {user.photoURL ? (
+                      <img
+                        src={user.photoURL}
+                        alt={displayName}
+                        className="warm-user-avatar"
+                      />
+                    ) : (
+                      <span className="warm-user-initial">{initial}</span>
+                    )}
+                    <span className="warm-user-label" title={user.email ?? ""}>
+                      {displayName}
+                    </span>
+                  </div>
+                  <button
+                    className="warm-nav-menu-primary"
+                    type="button"
+                    onClick={openDashboard}
+                  >
+                    <Sparkles size={15} />
+                    <span>Open Studio</span>
+                  </button>
+                  <button
+                    className="warm-nav-menu-secondary"
+                    type="button"
+                    onClick={() => {
+                      closeMenu();
+                      handleSignOut();
+                    }}
+                    disabled={loading}
+                  >
+                    <LogOut size={15} />
+                    <span>Sign out</span>
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    className="warm-nav-menu-primary"
+                    type="button"
+                    onClick={openDashboard}
+                  >
+                    <span>Get started</span>
+                  </button>
+                  <button
+                    className="warm-nav-menu-secondary"
+                    type="button"
+                    onClick={openLogin}
+                  >
+                    <UserIcon size={15} />
+                    <span>Sign in</span>
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </header>
       {loginOpen && <Login onClose={() => setLoginOpen(false)} />}
     </>

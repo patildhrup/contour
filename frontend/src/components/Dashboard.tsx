@@ -29,6 +29,7 @@ import {
   LogOut,
   Eye,
   FileDown,
+  MoreHorizontal,
 } from "lucide-react";
 import type { Settings, Result } from "../types";
 import { exportPdf } from "../utils/exportPdf";
@@ -65,6 +66,80 @@ function getApiBase(): string {
   return envUrl;
 }
 
+const UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp,image/bmp,image/gif";
+
+// Shared between the topbar and the mobile overflow menu so the two never drift.
+function StudioUploadButton({
+  setFile,
+  className = "studio-upload-btn",
+  label = "Upload",
+  title = "Upload a new image",
+}: {
+  setFile: (file: File) => void;
+  className?: string;
+  label?: string;
+  title?: string;
+}) {
+  return (
+    <label className={className} title={title}>
+      <Upload size={15} />
+      <span>{label}</span>
+      <input
+        type="file"
+        accept={UPLOAD_ACCEPT}
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) setFile(f);
+          e.target.value = "";
+        }}
+      />
+    </label>
+  );
+}
+
+function StudioZoomControls({
+  zoom,
+  handleZoom,
+  resetView,
+  setZoom,
+}: {
+  zoom: number;
+  handleZoom: (delta: number) => void;
+  resetView: () => void;
+  setZoom: (z: number) => void;
+}) {
+  return (
+    <div className="studio-canvas-actions">
+      <button
+        className="studio-icon-btn"
+        onClick={() => handleZoom(0.25)}
+        title="Zoom in (+)"
+      >
+        <ZoomIn size={16} />
+      </button>
+      <button
+        className="studio-icon-btn"
+        onClick={() => handleZoom(-0.25)}
+        title="Zoom out (-)"
+      >
+        <ZoomOut size={16} />
+      </button>
+      <button className="studio-icon-btn" onClick={resetView} title="Fit to view ([ ])">
+        <Maximize size={15} />
+      </button>
+      <button
+        className="studio-icon-btn studio-zoom-reset"
+        onClick={() => setZoom(1)}
+        title="Actual size 1:1"
+      >
+        1:1
+      </button>
+      <div className="studio-zoom-level">{Math.round(zoom * 100)}%</div>
+    </div>
+  );
+}
+
 export function Dashboard({
   file,
   setFile,
@@ -93,6 +168,7 @@ export function Dashboard({
   const [downloadModalOpen, setDownloadModalOpen] = useState(false);
   const [exporting, setExporting] = useState<"png" | "pdf" | "eps" | null>(null);
   const [exportError, setExportError] = useState("");
+  const [moreOpen, setMoreOpen] = useState(false);
 
   // Inspector cursor circle
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
@@ -112,6 +188,32 @@ export function Dashboard({
     setZoom(1);
     setPan({ x: 0, y: 0 });
   }, [file]);
+
+  // The overflow menu only exists on narrow viewports; close it when the
+  // layout returns to a full topbar, on Escape, or on an outside click.
+  useEffect(() => {
+    const wide = window.matchMedia("not all and (max-width: 820px)");
+    const close = () => setMoreOpen(false);
+    wide.addEventListener("change", close);
+    return () => wide.removeEventListener("change", close);
+  }, []);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMoreOpen(false);
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Element | null;
+      if (!target?.closest(".studio-more-menu, .studio-more-btn")) setMoreOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [moreOpen]);
 
   const resetView = () => {
     setZoom(1);
@@ -340,71 +442,30 @@ export function Dashboard({
           <div className="studio-divider" />
 
           {/* Zoom & Canvas controls */}
-          <div className="studio-canvas-actions">
-            <button
-              className="studio-icon-btn"
-              onClick={() => handleZoom(0.25)}
-              title="Zoom in (+)"
-            >
-              <ZoomIn size={16} />
-            </button>
-            <button
-              className="studio-icon-btn"
-              onClick={() => handleZoom(-0.25)}
-              title="Zoom out (-)"
-            >
-              <ZoomOut size={16} />
-            </button>
-            <button
-              className="studio-icon-btn"
-              onClick={resetView}
-              title="Fit to view ([ ])"
-            >
-              <Maximize size={15} />
-            </button>
-            <button
-              className="studio-icon-btn studio-zoom-reset"
-              onClick={() => setZoom(1)}
-              title="Actual size 1:1"
-            >
-              1:1
-            </button>
-            <div className="studio-zoom-level">{Math.round(zoom * 100)}%</div>
-          </div>
+          <StudioZoomControls
+            zoom={zoom}
+            handleZoom={handleZoom}
+            resetView={resetView}
+            setZoom={setZoom}
+          />
         </div>
 
         <div className="studio-topbar-right">
           {busy && (
-            <div className="studio-status-chip busy">
+            <div className="studio-status-chip busy" title="Tracing in progress">
               <LoaderCircle size={14} className="spin" />
               <span>Tracing…</span>
             </div>
           )}
 
           {stale && !busy && (
-            <button className="studio-retrace-chip" onClick={onConvert}>
+            <button className="studio-retrace-chip" onClick={onConvert} title="Update the vector">
               <Sparkles size={13} />
               <span>Update vector</span>
             </button>
           )}
 
-          <label
-            className="studio-upload-btn"
-            title="Upload a new image"
-          >
-            <Upload size={15} />
-            <span>Upload</span>
-            <input
-              type="file"
-              accept="image/png,image/jpeg,image/webp,image/bmp,image/gif"
-              style={{ display: "none" }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) setFile(f);
-                e.target.value = "";
-              }}
-            />
-          </label>
+          <StudioUploadButton setFile={setFile} />
 
           <button
             className="studio-home-btn"
@@ -438,13 +499,92 @@ export function Dashboard({
             <Download size={15} />
             <span>Download</span>
           </button>
+
+          {/* Mobile: zoom / file / account controls fold into this menu */}
+          <button
+            className="studio-more-btn"
+            type="button"
+            aria-expanded={moreOpen}
+            aria-controls="studio-more-menu"
+            aria-label={moreOpen ? "Close more menu" : "Open more menu"}
+            onClick={() => setMoreOpen((open) => !open)}
+          >
+            {moreOpen ? <X size={17} /> : <MoreHorizontal size={17} />}
+          </button>
         </div>
+
+        {moreOpen && (
+          <div className="studio-more-menu" id="studio-more-menu">
+            <div className="studio-more-group">
+              <span className="studio-more-label">Zoom</span>
+              <StudioZoomControls
+                zoom={zoom}
+                handleZoom={handleZoom}
+                resetView={resetView}
+                setZoom={setZoom}
+              />
+            </div>
+
+            <div className="studio-more-group">
+              <span className="studio-more-label">File</span>
+              <StudioUploadButton
+                setFile={setFile}
+                className="studio-more-item"
+                label="Upload new image"
+              />
+              <button
+                className="studio-more-item"
+                type="button"
+                onClick={() => {
+                  setMoreOpen(false);
+                  onBackToLanding();
+                }}
+              >
+                <Home size={15} />
+                <span>Home</span>
+              </button>
+            </div>
+
+            {user && (
+              <div className="studio-more-group">
+                <span className="studio-more-label">Account</span>
+                <div className="studio-more-account">
+                  <span className="studio-user-initial">
+                    {(user.displayName?.[0] || user.email?.[0] || "U").toUpperCase()}
+                  </span>
+                  <span className="studio-more-email">
+                    {user.email || user.displayName || "Signed in"}
+                  </span>
+                </div>
+                <button
+                  className="studio-more-item"
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false);
+                    signOut();
+                  }}
+                >
+                  <LogOut size={15} />
+                  <span>Sign out</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       {/* ── MAIN STUDIO WORKSPACE ────────────────────────────────────────── */}
       <div className="studio-body">
         {/* ── LEFT SIDEBAR ("Refine result") ────────────────────────────── */}
         <aside className={`studio-sidebar ${sidebarCollapsed ? "collapsed" : ""}`}>
+          {/* Mobile bottom-sheet grab handle; hidden on rail widths */}
+          <button
+            className="studio-sheet-handle"
+            type="button"
+            onClick={() => setSidebarCollapsed(true)}
+            aria-label="Hide refine panel"
+            title="Hide panel"
+          />
           {!activeTool ? (
             /* Main Tools Menu (Matching Screenshot 1) */
             <div className="studio-sidebar-content">
