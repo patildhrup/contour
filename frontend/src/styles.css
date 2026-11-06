@@ -2901,11 +2901,11 @@ dialog p {
   position: absolute;
   width: 44px;
   height: 44px;
-  border: 1.5px solid #38bdf8;
+  border: 1.5px solid var(--accent);
   border-radius: 50%;
   pointer-events: none;
   transform: translate(-50%, -50%);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 12px var(--accent-glow);
   z-index: 40;
 }
 
@@ -2983,8 +2983,8 @@ dialog p {
   background: rgba(255, 255, 255, 0.03);
 }
 .studio-region-row.selected {
-  border-color: #22d3ee;
-  background: rgba(34, 211, 238, 0.08);
+  border-color: var(--accent-deep);
+  background: var(--accent-ultra);
 }
 .studio-region-row.hidden {
   opacity: 0.45;
@@ -4895,21 +4895,24 @@ dialog p {
   display: grid;
   place-items: center;
   transition: background 0.15s linear;
+  box-shadow: 0 4px 14px rgba(255, 184, 0, 0.25);
 }
 .trace-counter-inner {
   position: absolute;
   inset: 7px;
   border-radius: 50%;
-  background: var(--panel, #0f1115);
-  display: flex;
+  background: var(--surface-3, #fff6e0);
+  border: 1px solid var(--line);
+  display: grid;
+  grid-auto-flow: column;
   align-items: baseline;
-  justify-content: center;
+  place-content: center;
   gap: 1px;
 }
 .trace-counter-num {
   font-size: 22px;
   font-weight: 800;
-  color: #22d3ee;
+  color: var(--accent-deep);
   font-variant-numeric: tabular-nums;
 }
 .trace-counter-pct {

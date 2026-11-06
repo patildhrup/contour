@@ -42,6 +42,7 @@ async def convert(
     color_precision: Annotated[int, Form(ge=1, le=8)] = 8,
     smoothing: Annotated[int, Form(ge=0, le=2)] = 1,
     detail: Annotated[int, Form(ge=1, le=3)] = 2,
+    edge_assist: Annotated[int, Form(ge=0, le=2)] = 1,
     speckle: Annotated[int, Form(ge=0, le=64)] = 4,
     corner: Annotated[int, Form(ge=0, le=2)] = 1,
     simplify: Annotated[int, Form(ge=0, le=2)] = 0,
@@ -50,7 +51,6 @@ async def convert(
     background_tolerance: Annotated[int, Form(ge=0, le=120)] = 10,
     alpha_threshold: Annotated[int, Form(ge=1, le=254)] = 128,
     mask_expand: Annotated[int, Form(ge=-5, le=5)] = 0,
-    engine: Annotated[Literal['classic', 'ai'], Form()] = 'classic',
     crop: Annotated[str, Form()] = '',
 ):
     try:
@@ -82,43 +82,12 @@ async def convert(
             'corner': corner, 'simplify': simplify, 'remove_background': remove_background,
             'corner_radius': corner_radius, 'background_tolerance': background_tolerance,
             'alpha_threshold': alpha_threshold, 'mask_expand': mask_expand,
+            'edge_assist': edge_assist,
         }
         crop_box = _parse_crop(crop)
         if crop_box:
             settings['crop'] = crop_box
 
-        # AI engine: forward to the configured external service. When it is
-        # unset or the call fails, degrade gracefully to the classic tracer and
-        # surface a warning instead of erroring, so the toggle always yields a
-        # vector result.
-        if engine == 'ai':
-            try:
-                from backend.services import deep
-                from backend.services.tracing import trace, ImageError
-                notice = None
-                result = None
-                if deep.configured():
-                    try:
-                        result = await asyncio.to_thread(deep.vectorize, data, file.content_type, settings)
-                    except Exception as exc:
-                        # Any failure talking to the external engine (cold start,
-                        # ZeroGPU quota, an unexpected reply shape) must not turn
-                        # into a 500; degrade to the classic tracer instead.
-                        notice = f'AI engine unavailable ({exc}); used the classic tracer.'
-                else:
-                    notice = 'AI engine is not configured on this deployment; used the classic tracer.'
-                if result is None or 'error' in result:
-                    try:
-                        result = await asyncio.to_thread(trace, data, file.content_type, settings)
-                    except ImageError as inner:
-                        raise HTTPException(422, str(inner))
-                    if 'error' in result:
-                        raise HTTPException(422, result['error'])
-                if notice:
-                    result['warnings'] = list(result.get('warnings', [])) + [notice]
-                return _finish(result, file, started)
-            finally:
-                slots.release()
         try:
             with tempfile.TemporaryDirectory(prefix='contour-') as directory:
                 target = Path(directory)

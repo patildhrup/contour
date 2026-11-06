@@ -24,7 +24,7 @@ export function FAQ() {
           ],
           [
             "Does Contour use artificial intelligence?",
-            "Contour uses a classical subpixel image-tracing engine with image preprocessing. It is not a trained AI model, generative AI, or a guarantee of perfect reconstruction.",
+            "No. Contour runs a unified vectorization engine: OpenCV image preprocessing followed by the VTracer tracing core. It is a deterministic tracing algorithm, not a trained AI or generative model, and not a guarantee of perfect reconstruction.",
           ],
           [
             "What happens to my uploads?",

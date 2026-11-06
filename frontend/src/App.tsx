@@ -207,17 +207,30 @@ export default function App() {
       return;
     }
     try {
-      const image = await createImageBitmap(f);
+      let image = await createImageBitmap(f);
       const pixels = image.width * image.height;
       const dimension = Math.max(image.width, image.height);
-      image.close();
-      if (token !== selection.current) return;
       if (pixels > limits.max_pixels || dimension > limits.max_dimension) {
-        setError(
-          `Please resize this image to ${(limits.max_pixels / 1_000_000).toFixed(1)} megapixels and ${limits.max_dimension} pixels per side or less.`,
+        // Oversize photos are downscaled here so conversion still runs
+        // instead of failing with a rejection message.
+        const factor = Math.min(
+          1,
+          Math.sqrt(limits.max_pixels / pixels),
+          limits.max_dimension / dimension,
         );
-        return;
+        const w = Math.max(1, Math.round(image.width * factor));
+        const h = Math.max(1, Math.round(image.height * factor));
+        const canvas = new OffscreenCanvas(w, h);
+        canvas.getContext("2d")!.drawImage(image, 0, 0, w, h);
+        image.close();
+        const flat = await canvas.convertToBlob({ type: "image/png" });
+        f = new File([flat], f.name.replace(/\.[^.]+$/, "") + ".png", {
+          type: "image/png",
+        });
+      } else {
+        image.close();
       }
+      if (token !== selection.current) return;
     } catch {
       if (token === selection.current)
         setError(

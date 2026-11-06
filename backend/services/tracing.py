@@ -8,8 +8,7 @@ import warnings
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from backend.config import MAX_PIXELS, MAX_DIMENSION, MAX_SVG_BYTES, TRACE_PIXEL_BUDGET
-from backend.services.contours import trace_regions
-from backend.services.preprocess import OUTSIDE, prepare
+from backend.services import preprocess, vectorize, optimize
 
 MIMES = {
     'PNG': 'image/png', 'JPEG': 'image/jpeg', 'WEBP': 'image/webp',
@@ -33,8 +32,10 @@ def decode(data: bytes, mime: str) -> Image.Image:
                 fmt = image.format or ''
                 if fmt not in MIMES:
                     raise ImageError('Unsupported format. Choose PNG, JPEG, WebP, BMP, GIF or TIFF.')
-                if image.width * image.height > MAX_PIXELS or max(image.size) > MAX_DIMENSION:
-                    raise ImageError(f'Image exceeds the {MAX_PIXELS:,} pixel or {MAX_DIMENSION}px side limit.')
+                # Only reject implausibly large rasters (bomb-style inputs);
+                # ordinary oversize photos are downscaled before tracing.
+                if image.width * image.height > MAX_PIXELS * 8 or max(image.size) > MAX_DIMENSION * 4:
+                    raise ImageError(f'Image exceeds the {MAX_PIXELS * 8:,} pixel or {MAX_DIMENSION * 4}px side limit.')
                 if getattr(image, 'n_frames', 1) > 1 and fmt != 'GIF':
                     raise ImageError('Animated images are not supported. Export a single frame first.')
                 image.verify()
@@ -88,7 +89,9 @@ def _build_svg(regions: list[dict], traced_size: tuple[int, int], original_size:
         parts.append(f'<g transform="scale({scale_x:.8f} {scale_y:.8f})">')
     for region in regions:
         fill = region['fill']
-        parts.append(f'<path fill="{fill}" fill-rule="evenodd" stroke="{fill}" '
+        # Nonzero winding (the SVG default) is what VTracer's contours assume;
+        # even-odd repaints self-intersecting splines as giant filled blobs.
+        parts.append(f'<path fill="{fill}" stroke="{fill}" '
                      f'stroke-width="{stroke_width:.4f}" stroke-linejoin="round" d="{region["d"]}"/>')
     if grouped:
         parts.append('</g>')
@@ -111,29 +114,71 @@ def _apply_crop(image: Image.Image, crop) -> Image.Image:
     return image.crop((x, y, x + w, y + h))
 
 
+def _build_palette(regions: list[dict]) -> list[dict]:
+    """Summarise one entry per colour: pixel-ish count and unioned bbox."""
+    grouped: dict[str, dict] = {}
+    for r in regions:
+        entry = grouped.setdefault(r['fill'], {'fill': r['fill'], 'count': 0, 'bbox': [0, 0, 0, 0]})
+        x, y, w, h = (float(v) for v in r['bbox'])
+        entry['count'] += int(round(w * h))
+        box = entry['bbox']
+        if box[1] == 0 and box[3] == 0:
+            box[:] = [x, y, w, h]
+        else:
+            left, top = min(box[0], x), min(box[1], y)
+            right, bottom = max(box[0] + box[2], x + w), max(box[1] + box[3], y + h)
+            box[:] = [left, top, right - left, bottom - top]
+    return list(grouped.values())
+
+
+def _fit_within_limits(image: Image.Image) -> tuple[Image.Image, str | None]:
+    """Downscale oversize uploads so conversion always produces a result."""
+    pixels = image.width * image.height
+    if pixels <= MAX_PIXELS and max(image.size) <= MAX_DIMENSION:
+        return image, None
+    factor = min(math.sqrt(MAX_PIXELS / pixels), MAX_DIMENSION / max(image.size))
+    size = (max(1, round(image.width * factor)), max(1, round(image.height * factor)))
+    resized = image.resize(size, Image.Resampling.LANCZOS)
+    notice = f'Large image was resized from {image.width}×{image.height} to {size[0]}×{size[1]} before tracing.'
+    return resized, notice
+
+
 def trace(data: bytes, mime: str, settings: dict) -> dict:
     image = decode(data, mime)
     image = _apply_crop(image, settings.get('crop'))
+    image, resize_notice = _fit_within_limits(image)
     original_size = image.size
     image = _bound_resolution(image)
     traced_size = image.size
+    notices: list[str] = []
+    if resize_notice:
+        notices.append(resize_notice)
 
-    prepared = prepare(image, settings)
-    notices = list(prepared.notices)
+    # Resampling bleeds sharp palette boundaries into gradients; for flat-colour
+    # artwork snap the resized bitmap back to solid zones so the tracer does not
+    # follow thousands of intermediate-colour contours.
+    if traced_size != original_size and preprocess.looks_flat_art(image):
+        image = preprocess.requantize(image)
+        notices.append('Flat-colour artwork was re-quantised after resizing to keep its edges crisp.')
 
-    visible = bool((prepared.labels != OUTSIDE).any())
-    regions = trace_regions(prepared.labels, prepared.palette, prepared.coverage,
-                            prepared.partner, settings) if visible else []
+    prepared, prep_notices, has_transparency = preprocess.prepare_image(image, settings)
+    notices.extend(prep_notices)
+    svg_raw = vectorize.prepared_to_svg(prepared, settings)
+    regions = vectorize.svg_to_regions(svg_raw, traced_size)
+    regions = optimize.regions(regions, settings, traced_size, has_transparency)
+    regions = optimize.dedupe_fills(regions)
+
     if not regions:
         svg = _empty_svg(*original_size)
         paths = 0
     else:
         svg = _build_svg(regions, traced_size, original_size)
         paths = len(regions)
-    if len(svg.encode()) > MAX_SVG_BYTES:
-        raise ImageError('The vector is too complex. Try fewer colors, less detail or more noise filtering.')
-    palette = [{'fill': r['fill'], 'count': int(round(r['area'])), 'bbox': r['bbox']}
-               for r in regions]
+    try:
+        optimize.validate_svg(svg, MAX_SVG_BYTES)
+    except ValueError as exc:
+        raise ImageError(str(exc))
+
     return {
         'svg': svg,
         'width': original_size[0],
@@ -141,6 +186,6 @@ def trace(data: bytes, mime: str, settings: dict) -> dict:
         'paths': paths,
         'scale': [original_size[0] / traced_size[0], original_size[1] / traced_size[1]],
         'regions': [{'fill': r['fill'], 'd': r['d'], 'bbox': r['bbox']} for r in regions],
-        'palette': palette,
+        'palette': _build_palette(regions),
         'warnings': notices,
     }

@@ -82,6 +82,22 @@ export function ConversionSettings({
           <option value="2">Balanced</option>
           <option value="3">High · finer details</option>
         </select>
+        <label className="setting-label" htmlFor="edge_assist">
+          Edge detection assist
+        </label>
+        <select
+          id="edge_assist"
+          value={value.edge_assist}
+          onChange={(e) => update("edge_assist", +e.target.value)}
+        >
+          <option value="0">Off · trace raw pixels</option>
+          <option value="1">Auto · flatten photos to colour zones</option>
+          <option value="2">Strong · flatten + emphasise contours</option>
+        </select>
+        <p className="setting-help">
+          Auto and Strong add mean-shift denoising and Canny edge detection for
+          photographs and gradients. Flat logos and icons work best with Off.
+        </p>
         <label className="setting-label" htmlFor="smoothing">
           Curve smoothing
         </label>

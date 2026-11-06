@@ -88,7 +88,7 @@ def root():
 def health():
     return {
         'status': 'ok',
-        'engine': 'contour-subpixel 1.0',
+        'engine': 'contour-vector 1.0 (vtracer)',
         'engine_ok': True,
         'max_upload_bytes': MAX_UPLOAD_BYTES,
         'max_pixels': MAX_PIXELS,

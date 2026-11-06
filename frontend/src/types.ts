@@ -4,6 +4,7 @@ export type Settings = {
   color_precision: number;
   smoothing: number;
   detail: number;
+  edge_assist: number;
   speckle: number;
   corner: number;
   corner_radius: number;
@@ -12,7 +13,6 @@ export type Settings = {
   background_tolerance: number;
   alpha_threshold: number;
   mask_expand: number;
-  engine: "classic" | "ai";
 };
 export type Region = {
   fill: string;
@@ -39,6 +39,7 @@ export const defaults: Settings = {
   color_precision: 6,
   smoothing: 1,
   detail: 2,
+  edge_assist: 1,
   speckle: 4,
   corner: 1,
   corner_radius: 0,
@@ -47,5 +48,4 @@ export const defaults: Settings = {
   background_tolerance: 10,
   alpha_threshold: 128,
   mask_expand: 0,
-  engine: "classic",
 };

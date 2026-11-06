@@ -39,7 +39,9 @@ export function serializeLayers(
     .map((layer) => {
       const lower = layer.fill.toLowerCase();
       const fill = (mapping[lower] || layer.fill).trim();
-      return `<path fill="${fill}" fill-rule="evenodd" stroke="${fill}" ` +
+      // Nonzero winding (the SVG default) matches the backend wrapper and
+      // VTracer's contour assumptions; even-odd repaints blobs over detail.
+      return `<path fill="${fill}" stroke="${fill}" ` +
         `stroke-width="${strokeWidth}" stroke-linejoin="round" d="${layer.d}"/>`;
     })
     .join("");

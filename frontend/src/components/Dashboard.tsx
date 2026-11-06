@@ -156,7 +156,7 @@ function TraceCounter({ progress, label }: { progress: number; label: string }) 
       <div
         className="trace-counter-ring"
         style={{
-          background: `conic-gradient(#22d3ee ${progress * 3.6}deg, rgba(255,255,255,0.10) 0deg)`,
+          background: `conic-gradient(var(--accent) ${progress * 3.6}deg, rgba(26, 18, 0, 0.08) 0deg)`,
         }}
       >
         <span className="trace-counter-inner">
@@ -468,8 +468,7 @@ export function Dashboard({
                 key={layer.id}
                 d={layer.d}
                 fill={paletteMapping[layer.fill.toLowerCase()] || layer.fill}
-                fillRule="evenodd"
-                stroke={selected.includes(layer.id) ? "#22d3ee" : "none"}
+                stroke={selected.includes(layer.id) ? "#e69500" : "none"}
                 strokeWidth={selected.includes(layer.id) ? 1.5 : 0}
                 style={{ cursor: regionEdit ? "pointer" : "inherit" }}
                 onPointerDown={(e) => {
@@ -1374,30 +1373,6 @@ export function Dashboard({
                       className="studio-range"
                     />
                   </div>
-
-                  <div className="studio-control-block">
-                    <label className="studio-section-label">Tracing engine</label>
-                    <div className="studio-segmented" style={{ width: "100%", marginTop: 8 }}>
-                      <button
-                        className={`studio-tab ${settings.engine === "classic" ? "active" : ""}`}
-                        onClick={() => updateSetting("engine", "classic")}
-                        style={{ flex: 1 }}
-                      >
-                        Classic
-                      </button>
-                      <button
-                        className={`studio-tab ${settings.engine === "ai" ? "active" : ""}`}
-                        onClick={() => updateSetting("engine", "ai")}
-                        style={{ flex: 1 }}
-                      >
-                        AI (beta)
-                      </button>
-                    </div>
-                    <p className="studio-tool-hint">
-                      AI uses the configured external deep-learning service and
-                      falls back to the classic tracer when it is unavailable.
-                    </p>
-                  </div>
                 </div>
               )}
 
@@ -1519,11 +1494,10 @@ export function Dashboard({
                         />
                       ) : (
                         <div className="studio-loading-placeholder">
-                          {busy ? (
-                            <TraceCounter progress={progress} label="Tracing contours…" />
-                          ) : (
-                            "Awaiting trace…"
-                          )}
+                          <TraceCounter
+                            progress={progress}
+                            label={busy ? "Tracing contours…" : "Awaiting trace…"}
+                          />
                         </div>
                       )}
                     </div>
@@ -1549,11 +1523,10 @@ export function Dashboard({
                     />
                   ) : (
                     <div className="studio-loading-placeholder">
-                      {busy ? (
-                        <TraceCounter progress={progress} label="Processing vector…" />
-                      ) : (
-                        "Processing vector…"
-                      )}
+                      <TraceCounter
+                        progress={progress}
+                        label={busy ? "Processing vector…" : "Awaiting vector…"}
+                      />
                     </div>
                   )}
                   <div className="studio-badge-overlay right">Contour Result</div>

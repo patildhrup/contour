@@ -152,8 +152,8 @@ def svg_to_eps(svg_text: str) -> bytes:
             # A (arc) commands are rare in Contour output; skip gracefully.
 
         if has_content:
-            # Use even-odd fill rule to match SVG fill-rule="evenodd"
-            buf.write('eofill\n')
+            # Nonzero winding matches the SVG default used by the tracer output
+            buf.write('fill\n')
 
     buf.write('grestore\n')
     buf.write('%%EOF\n')

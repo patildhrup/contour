@@ -16,12 +16,6 @@ MAX_SVG_BYTES = int(os.getenv('MAX_SVG_BYTES', '20971520'))
 # back to original dimensions), bounding subpixel tracing time.
 TRACE_PIXEL_BUDGET = int(os.getenv('TRACE_PIXEL_BUDGET', '1600000'))
 
-# Optional external deep-learning / GPU vectorization service. When unset the
-# 'ai' engine falls back to the classic tracer with a warning. The provider is
-# managed outside this repo; see README for the request/response contract.
-AI_ENGINE_URL = os.getenv('AI_ENGINE_URL', '').strip()
-AI_ENGINE_TOKEN = os.getenv('AI_ENGINE_TOKEN', '').strip()
-
 DEFAULT_ORIGINS = (
     'http://localhost:5173,http://127.0.0.1:5173,'
     'http://localhost:8080,http://127.0.0.1:8080,'
