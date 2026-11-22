@@ -9,7 +9,7 @@ Requires Python 3.12 and Node.js 22. From the repository root:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
-.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8080
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 In another terminal:
@@ -17,10 +17,12 @@ In another terminal:
 ```powershell
 cd frontend
 npm ci
-npm run dev
+npm run dev:all
 ```
 
-Open http://localhost:5173. Vite proxies `/api` to port 8080. On macOS/Linux use `.venv/bin/python`. Run backend commands from the repository root. No account, API key or external AI model is required.
+`npm run dev:all` starts Vite and the backend together, so conversion never fails because uvicorn was not started. Use `npm run dev` when the backend is already running on port 8000, or `npm run backend` to start only the backend (it skips startup if one is already healthy).
+
+Open http://localhost:5173. Vite proxies `/api` to port 8000. On macOS/Linux use `.venv/bin/python`. Run backend commands from the repository root. No account, API key or external AI model is required.
 
 ## Workflow
 
@@ -66,7 +68,7 @@ PDF export preserves path geometry, fill rules and ancestor transforms. Unsuppor
 | mask_expand | -5 to 5; 0 | Foreground mask growth/erosion in pixels |
 | crop | `x,y,w,h` px; empty | Pre-crop the bitmap before tracing to raise detail and stay within resolution limits |
 
-Success JSON: `{id, svg, width, height, paths, scale, regions, palette, filename, warnings, elapsed_ms}`. `regions` is the editable layer list (`{fill, d, bbox}` in traced-pixel space) and `palette` reports detected colours with pixel counts; `scale` maps traced coordinates back to the original image, so the browser can rebuild the same SVG after region edits. API documentation is at http://localhost:8080/docs. Errors cover invalid images/settings (422), unsupported MIME (415), upload limits (413), overload (429), timeout (504) and service errors (500).
+Success JSON: `{id, svg, width, height, paths, scale, regions, palette, filename, warnings, elapsed_ms}`. `regions` is the editable layer list (`{fill, d, bbox}` in traced-pixel space) and `palette` reports detected colours with pixel counts; `scale` maps traced coordinates back to the original image, so the browser can rebuild the same SVG after region edits. API documentation is at http://localhost:8000/docs. Errors cover invalid images/settings (422), unsupported MIME (415), upload limits (413), overload (429), timeout (504) and service errors (500).
 
 ## Limits and image behavior
 

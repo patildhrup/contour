@@ -28,22 +28,29 @@ import { ProtectedRoute } from "./components/ProtectedRoute";
 import { Login } from "./components/Login";
 import { WarmHero } from "./components/WarmHero";
 import { WarmFeatures } from "./components/WarmFeatures";
+const isLocalHost = () =>
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1");
+
 function getApiBase(): string {
   const envUrl = (import.meta.env.VITE_API_BASE_URL || "")
     .trim()
     .replace(/\/+$/, "");
+  // An explicit API origin wins, including in local development.
+  if (envUrl) return envUrl;
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
-    // On local environment, use same-origin proxy to local backend (port 8080)
+    // On local environment, use same-origin proxy to local backend (port 8000)
     if (host === "localhost" || host === "127.0.0.1") {
       return "";
     }
     // When running on Vercel frontend, default to production backend if not explicitly set
-    if (host.endsWith(".vercel.app") && !envUrl) {
+    if (host.endsWith(".vercel.app")) {
       return "https://contour-backend.vercel.app";
     }
   }
-  return envUrl;
+  return "";
 }
 
 const apiBase = getApiBase();
@@ -274,8 +281,10 @@ export default function App() {
           errorMsg = json.detail;
         } else if (Array.isArray(json?.detail)) {
           errorMsg = json.detail.map((e: any) => `${e.loc?.slice(-1)[0] || "field"}: ${e.msg}`).join(", ");
-        } else if (response.status === 502 || response.status === 504 || response.status === 500) {
-          errorMsg = `Backend server unavailable (${response.status}). Please ensure uvicorn is running on port 8080.`;
+        } else if (response.status >= 500) {
+          errorMsg = isLocalHost()
+            ? `Conversion server error (${response.status}). Check the backend terminal, then retry.`
+            : `Conversion is temporarily unavailable (${response.status}). Please try again in a moment.`;
         }
         throw new Error(errorMsg);
       }
@@ -300,7 +309,9 @@ export default function App() {
       )
         setError(
           e instanceof TypeError
-            ? "The conversion server is unavailable. Start the backend and try again."
+            ? isLocalHost()
+              ? "The conversion server is unavailable. Start it with 'npm run dev:all' and try again."
+              : "The conversion server is unavailable. Please try again in a moment."
             : e instanceof Error
               ? e.message
               : "Something went wrong. Please try again.",

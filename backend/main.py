@@ -8,40 +8,9 @@ from backend.routes.convert import router
 from backend.routes.export import router as export_router
 
 
-class BodyLimit:
-    """Bound the complete multipart body before Starlette parses or spools it."""
-    def __init__(self, app):
-        self.app = app
-
-    async def __call__(self, scope, receive, send):
-        if scope['type'] != 'http':
-            return await self.app(scope, receive, send)
-        if scope['method'] == 'POST':
-            body = bytearray()
-            while True:
-                message = await receive()
-                if message['type'] == 'http.disconnect':
-                    return
-                body.extend(message.get('body', b''))
-                if len(body) > MAX_UPLOAD_BYTES + 65536:
-                    return await JSONResponse({'detail': 'Upload exceeds the size limit.'}, status_code=413)(scope, receive, send)
-                if not message.get('more_body'):
-                    break
-            delivered = False
-            async def replay():
-                nonlocal delivered
-                if not delivered:
-                    delivered = True
-                    return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
-                return await receive()
-            return await self.app(scope, replay, send)
-        return await self.app(scope, receive, send)
-
-
 app = FastAPI(title='Contour API', version='1.0.0')
 app.include_router(router, prefix='/api')
 app.include_router(export_router, prefix='/api')
-app.add_middleware(BodyLimit)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,

@@ -8,5 +8,6 @@ __pycache__/
 *.log
 
 backend/tests/*
+!backend/tests/test_deployment_requirements.py
 docs
 

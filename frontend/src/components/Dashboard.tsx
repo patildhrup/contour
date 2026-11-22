@@ -68,12 +68,14 @@ type DashboardProps = {
 
 function getApiBase(): string {
   const envUrl = (import.meta.env.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
+  // An explicit API origin wins, including in local development.
+  if (envUrl) return envUrl;
   if (typeof window !== "undefined") {
     const host = window.location.hostname;
     if (host === "localhost" || host === "127.0.0.1") return "";
-    if (host.endsWith(".vercel.app") && !envUrl) return "https://contour-backend.vercel.app";
+    if (host.endsWith(".vercel.app")) return "https://contour-backend.vercel.app";
   }
-  return envUrl;
+  return "";
 }
 
 const UPLOAD_ACCEPT = "image/png,image/jpeg,image/webp,image/bmp,image/gif";

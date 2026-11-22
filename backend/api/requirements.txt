@@ -1,10 +1,12 @@
-# NOTE: keep in sync with backend/requirements.txt.
-# Vercel's @vercel/python only installs dependencies from a requirements.txt
-# placed next to the entrypoint (api/index.py), so this copy is required for
-# the serverless build to succeed.
+# Runtime dependencies for the serverless /api/convert entrypoint.
+# Keep in sync with backend/requirements.txt, except torch: StarVector is
+# called over HTTP, so the local model runtime is not needed on Vercel.
 fastapi==0.156.4
 uvicorn==0.54.0
 python-multipart==0.0.32
 pillow==13.0.0
 numpy==2.5.4
 python-dotenv==1.2.4
+httpx==0.28.1
+opencv-python-headless==5.0.0.93
+vtracer==0.6.15
