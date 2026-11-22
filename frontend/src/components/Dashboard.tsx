@@ -37,7 +37,7 @@ import { type Layer } from "../utils/regions";
 import { useAuth } from "../auth/AuthContext";
 
 type ViewMode = "compare" | "vector" | "outlines";
-type ActiveTool = null | "background" | "palette" | "regions" | "geometry" | "corners";
+type ActiveTool = null | "background" | "palette" | "regions" | "geometry" | "corners" | "engine";
 
 type DashboardProps = {
   file: File | null;
@@ -63,6 +63,7 @@ type DashboardProps = {
   originalUrl: string;
   vectorUrl: string;
   onBackToLanding: () => void;
+  error?: string;
 };
 
 function getApiBase(): string {
@@ -193,6 +194,7 @@ export function Dashboard({
   originalUrl,
   vectorUrl,
   onBackToLanding,
+  error,
 }: DashboardProps) {
   const { user, signOut } = useAuth();
   const [viewMode, setViewMode] = useState<ViewMode>("compare");
@@ -1494,10 +1496,27 @@ export function Dashboard({
                         />
                       ) : (
                         <div className="studio-loading-placeholder">
-                          <TraceCounter
-                            progress={progress}
-                            label={busy ? "Tracing contours…" : "Awaiting trace…"}
-                          />
+                          {error ? (
+                            <div style={{ textAlign: "center", padding: 20 }}>
+                              <p style={{ color: "#ef4444", fontSize: 14, fontWeight: 500, marginBottom: 12 }}>
+                                {error}
+                              </p>
+                              <button
+                                className="studio-sidebar-download-btn"
+                                style={{ width: "auto", margin: "0 auto", padding: "8px 16px" }}
+                                onClick={onConvert}
+                                disabled={busy}
+                              >
+                                {busy ? <LoaderCircle size={14} className="spin" /> : <RotateCcw size={14} />}
+                                <span>Retry Trace</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <TraceCounter
+                              progress={progress}
+                              label={busy ? "Tracing contours…" : "Awaiting trace…"}
+                            />
+                          )}
                         </div>
                       )}
                     </div>
@@ -1523,10 +1542,27 @@ export function Dashboard({
                     />
                   ) : (
                     <div className="studio-loading-placeholder">
-                      <TraceCounter
-                        progress={progress}
-                        label={busy ? "Processing vector…" : "Awaiting vector…"}
-                      />
+                      {error ? (
+                        <div style={{ textAlign: "center", padding: 20 }}>
+                          <p style={{ color: "#ef4444", fontSize: 14, fontWeight: 500, marginBottom: 12 }}>
+                            {error}
+                          </p>
+                          <button
+                            className="studio-sidebar-download-btn"
+                            style={{ width: "auto", margin: "0 auto", padding: "8px 16px" }}
+                            onClick={onConvert}
+                            disabled={busy}
+                          >
+                            {busy ? <LoaderCircle size={14} className="spin" /> : <RotateCcw size={14} />}
+                            <span>Retry Trace</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <TraceCounter
+                          progress={progress}
+                          label={busy ? "Processing vector…" : "Awaiting vector…"}
+                        />
+                      )}
                     </div>
                   )}
                   <div className="studio-badge-overlay right">Contour Result</div>

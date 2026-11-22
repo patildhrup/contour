@@ -16,6 +16,18 @@ MAX_SVG_BYTES = int(os.getenv('MAX_SVG_BYTES', '20971520'))
 # back to original dimensions), bounding subpixel tracing time.
 TRACE_PIXEL_BUDGET = int(os.getenv('TRACE_PIXEL_BUDGET', '1600000'))
 
+# StarVector-1B and SAM 2 AI pipeline configuration
+HUGGINGFACE_API_KEY = (
+    os.getenv('HUGGINGFACE_API_KEY')
+    or os.getenv('HUGGINGFACE_ACCESS_TOKEN')
+    or os.getenv('HF_TOKEN')
+    or ''
+).strip().strip('"').strip("'")
+STARVECTOR_MODEL_ID = os.getenv('STARVECTOR_MODEL_ID', 'starvector/starvector-1b-im2svg')
+STARVECTOR_ENDPOINT = os.getenv('STARVECTOR_ENDPOINT', '')
+SAM2_ENDPOINT = os.getenv('SAM2_ENDPOINT', '')
+DEFAULT_ENGINE = os.getenv('DEFAULT_ENGINE', 'hybrid')
+
 DEFAULT_ORIGINS = (
     'http://localhost:5173,http://127.0.0.1:5173,'
     'http://localhost:8080,http://127.0.0.1:8080,'

@@ -34,6 +34,44 @@ export function ConversionSettings({
           </button>
         </div>
         <p className="setting-help">Clean curves softens contour noise. Fine detail keeps small features and more corners.</p>
+        <h4 className="settings-section">00 / Vector Engine &amp; AI</h4>
+        <label className="setting-label" htmlFor="engine">
+          Engine Pipeline
+        </label>
+        <select
+          id="engine"
+          value={value.engine}
+          onChange={(e) => update("engine", e.target.value as Settings["engine"])}
+        >
+          <option value="hybrid">Hybrid (OpenCV + StarVector-1B + VTracer)</option>
+          <option value="starvector">StarVector-1B (Neural AI · im2svg)</option>
+          <option value="vtracer">VTracer (Classical High-Precision Splines)</option>
+        </select>
+        <label className="setting-label" htmlFor="denoise_method">
+          OpenCV Denoise filter
+        </label>
+        <select
+          id="denoise_method"
+          value={value.denoise_method}
+          onChange={(e) => update("denoise_method", e.target.value as Settings["denoise_method"])}
+        >
+          <option value="bilateral">Bilateral (Edge-Preserving · Crisp Curves)</option>
+          <option value="nlmeans">Non-Local Means (Compression cleaning)</option>
+          <option value="gaussian">Gaussian Soften</option>
+          <option value="none">Off (Raw pixels)</option>
+        </select>
+        <label className="checkbox-label" style={{ marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={value.sam_enabled}
+            onChange={(e) => update("sam_enabled", e.target.checked)}
+          />
+          Enable SAM 2 object segmentation
+        </label>
+        <p className="setting-help">
+          Bilateral filtering removes anti-aliasing pixel staircasing while keeping curved edges pin-sharp.
+        </p>
+
         <h4 className="settings-section">01 / Color &amp; curves</h4>
         <label className="setting-label" htmlFor="mode">
           Color mode

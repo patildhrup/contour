@@ -268,12 +268,17 @@ export default function App() {
         signal: controller.signal,
       });
       const json = await response.json().catch(() => null);
-      if (!response.ok)
-        throw new Error(
-          typeof json?.detail === "string"
-            ? json.detail
-            : "Conversion failed. Please try another image or simpler settings.",
-        );
+      if (!response.ok) {
+        let errorMsg = "Conversion failed. Please try another image or simpler settings.";
+        if (typeof json?.detail === "string") {
+          errorMsg = json.detail;
+        } else if (Array.isArray(json?.detail)) {
+          errorMsg = json.detail.map((e: any) => `${e.loc?.slice(-1)[0] || "field"}: ${e.msg}`).join(", ");
+        } else if (response.status === 502 || response.status === 504 || response.status === 500) {
+          errorMsg = `Backend server unavailable (${response.status}). Please ensure uvicorn is running on port 8080.`;
+        }
+        throw new Error(errorMsg);
+      }
       if (!json?.svg || !json.svg.includes("<svg"))
         throw new Error(
           "The server returned an invalid vector result. Please try again.",
@@ -379,6 +384,7 @@ export default function App() {
         setCrop={setCrop}
         busy={busy}
         stale={stale}
+        error={error}
         onConvert={() => void convert()}
         originalUrl={originalUrl}
         vectorUrl={vectorUrl}

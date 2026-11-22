@@ -13,6 +13,11 @@ export type Settings = {
   background_tolerance: number;
   alpha_threshold: number;
   mask_expand: number;
+  engine: "hybrid" | "starvector" | "vtracer";
+  denoise_method: "bilateral" | "nlmeans" | "gaussian" | "none";
+  threshold_method: "adaptive" | "otsu" | "none";
+  edge_detection: "canny" | "sobel" | "none";
+  sam_enabled: boolean;
 };
 export type Region = {
   fill: string;
@@ -48,4 +53,9 @@ export const defaults: Settings = {
   background_tolerance: 10,
   alpha_threshold: 128,
   mask_expand: 0,
+  engine: "hybrid",
+  denoise_method: "bilateral",
+  threshold_method: "adaptive",
+  edge_detection: "canny",
+  sam_enabled: false,
 };

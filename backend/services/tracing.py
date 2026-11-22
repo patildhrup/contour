@@ -161,9 +161,26 @@ def trace(data: bytes, mime: str, settings: dict) -> dict:
         image = preprocess.requantize(image)
         notices.append('Flat-colour artwork was re-quantised after resizing to keep its edges crisp.')
 
+    # Stage 2: OpenCV Preprocessing (Denoising, Thresholding, Edge detection & Primitives)
+    from backend.services.opencv_preprocess import run_opencv_pipeline
+    image, cv_meta = run_opencv_pipeline(image, settings)
+    if cv_meta.get('edges_detected'):
+        notices.append(f"OpenCV edge detection ({cv_meta['edge_method']}) active: {cv_meta['geometric_primitives_found']} geometric primitives found.")
+
+    # Stage 3: SAM 2 (optional) Object segmentation
+    if settings.get('sam_enabled', False):
+        from backend.services.sam_segment import segment_with_opencv
+        segments = segment_with_opencv(image)
+        if segments:
+            notices.append(f"SAM 2 layer segmentation identified {len(segments)} distinct object regions.")
+
+    # Stage 4: StarVector-1B / VTracer raster-to-vector conversion
     prepared, prep_notices, has_transparency = preprocess.prepare_image(image, settings)
     notices.extend(prep_notices)
-    svg_raw = vectorize.prepared_to_svg(prepared, settings)
+    svg_raw, engine_notice = vectorize.prepared_to_svg(prepared, settings)
+    if engine_notice:
+        notices.append(engine_notice)
+
     regions = vectorize.svg_to_regions(svg_raw, traced_size)
     regions = optimize.regions(regions, settings, traced_size, has_transparency)
     regions = optimize.dedupe_fills(regions)
